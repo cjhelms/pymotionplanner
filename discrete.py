@@ -1,55 +1,28 @@
 """
-Simple implementation and demo of some discrete motion planning algorithms:
+Implementations of some discrete motion planning algorithms
 
-  - Breadth-first search
-  - Depth-first search
-  - Dijkstra's algorithm
-  - A*
+The algorithms are implemented in the *MotionPlanner classes. See relevant class for more details
+on specific usage.
 
-Environment (example):
+Generally, to use a planner, you must define the robot, which tells the planner how the robot moves
+and transforms in space, the initial and goal states for the robot, and an occupancy grid so the
+planner knows what states are occupied by obstacles.
 
-   ┌───────────┐
-   │ ^     ┌┐  │  ^ := Start
-   │ ┌─┐   ││  │  # := Goal
-   │ │ └─┐ └┘  │  o := Origin
-  x▲ │ ┌─┘     │  ─ := Obstacle boundary
-   │ └─┘     # │
-   o──►────────┘
-     y
+Currently, the occupancy grid is restricted to be a uniform grid with aligned rows and columns.
+Therefore, the only possible movements are up, down, left, right, and diagonal. Further, the
+planners do not check for collisions along a "path" generated during a transition, so robots should
+transition in a way such that the new state is no more than 1 grid square away from the original:
 
-Axis shown is the "world frame".
+  x x x x x            LEGEND
+  x ^ ^ ^ x    ──────────────────────
+  x ^ o ^ x    x := Invalid new state
+  x ^ ^ ^ x    ^ := Valid new state
+  x x x x x    o := Original state
 
-The obstacles shall be represented using an occupancy grid. That is, since the space is already
-discretized into (in this instance) R^2, we simply encode the cells which correspond to obstacles
-in a look-up table such that if p E R^2 maps to "True" then p is occupied and is not a valid space
-for the robot to occupy. Encoding the example above where "1" is "True" and "0" is "False" yields:
-    ┌                           ┐
-  6 │ 1 1 1 1 1 1 1 1 1 1 1 1 1 │
-  5 │ 1 0 0 0 0 0 0 0 1 1 0 0 1 │
-  4 │ 1 0 1 1 1 0 0 0 1 1 0 0 1 │
-  3 │ 1 0 1 1 1 1 1 0 1 1 0 0 1 │
-  2 │ 1 0 1 1 1 1 1 0 0 0 0 0 1 │
-  1 │ 1 0 1 1 1 0 0 0 0 0 0 0 1 │
-  0 │ 1 1 1 1 1 1 1 1 1 1 1 1 1 │
-    └                           ┘
-      0 1 2 3 ...
-
-Robot:
-
-    ▲ x
-    │
-  ┌─│─┐
-  │ o────► y
-  └───┘
-
-Axis shown is the "body frame" which moves about in the world frame. Coincidentally, since the
-robot does not rotate, by choosing to align the body and world frame, we can coerce the
-transformation matrix between the two frames to be the identity matrix. We shall do this by
-convention.
-
-The robot is free to move in both x and y dimensions independently.
-
-The robot may only move one cell at a time (i.e. the robot cannot skip cells during a transition).
+The planners do not assume any structure on the state or input spaces, so they can be anything
+(R^2, R^2 X S^1, etc...), nor do they make any assumptions about how complex or simple transitions
+between states are (linear, nonlinear, etc...). These decisions are left to the user, although it is
+worth noting that performance is heavily determined by these decisions!
 """
 
 from __future__ import annotations

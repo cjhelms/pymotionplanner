@@ -1,3 +1,54 @@
+"""
+Simple demo of some discrete motion planning algorithms
+
+Environment (example):
+
+   ┌───────────┐           LEGEND
+   │ ^     ┌┐  │    ──────────────────────
+   │ ┌─┐   ││  │    ^ := Start
+   │ │ └─┐ └┘  │    # := Goal
+  x▲ │ ┌─┘     │    o := Origin
+   │ └─┘     # │    ─ := Obstacle boundary
+   o──►────────┘
+     y
+
+The world is N^2 (i.e {0, 1, 2, ...}^2).
+
+Axis shown is the "world frame" with origin at (0, 0).
+
+The obstacles shall be represented using an occupancy grid. That is, since the space is already
+discretized into (in this instance) N^2, we simply encode the cells which correspond to obstacles
+in a look-up table such that if p E R^2 maps to "True" then p is occupied and is not a valid space
+for the robot to occupy. Encoding the example above where "1" is "True" and "0" is "False" yields:
+    ┌                           ┐
+  6 │ 1 1 1 1 1 1 1 1 1 1 1 1 1 │
+  5 │ 1 0 0 0 0 0 0 0 1 1 0 0 1 │
+  4 │ 1 0 1 1 1 0 0 0 1 1 0 0 1 │
+  3 │ 1 0 1 1 1 1 1 0 1 1 0 0 1 │
+  2 │ 1 0 1 1 1 1 1 0 0 0 0 0 1 │
+  1 │ 1 0 1 1 1 0 0 0 0 0 0 0 1 │
+  0 │ 1 1 1 1 1 1 1 1 1 1 1 1 1 │
+    └                           ┘
+      0 1 2 3 ...
+
+Robot:
+
+    ▲ x
+    │
+  ┌─│─┐
+  │ o────► y
+  └───┘
+
+Axis shown is the "body frame" which moves about in the world frame. Coincidentally, since the
+robot does not rotate, by choosing to align the body and world frame, we can coerce the
+transformation matrix between the two frames to be the identity matrix. We shall do this by
+convention.
+
+The robot is free to move in both x and y dimensions independently.
+
+The robot may only move one cell at a time (i.e. the robot cannot skip cells during a transition).
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -30,7 +81,9 @@ def main() -> None:
 
 
 def parse_command_line_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Driver for demo of discrete motion planners"
+    )
     parser.add_argument(
         "-a",
         "--algorithm",
@@ -49,6 +102,7 @@ def parse_command_line_arguments() -> argparse.Namespace:
 
 
 def make_settings(do_shuffle_inputs: bool) -> Settings:
+    # Settings were chosen arbitrarily to make the search problem solvable and "interesting"
     initial_state = State2D(1, 9)
     goal_state = State2D(18, 1)
     world_northwest_corner = State2D(30, 30)
@@ -111,6 +165,8 @@ class HolonomicRobot2D:
         return State2D(state.x + input.dx, state.y + input.dy)
 
     def get_inputs(self, state: State2D) -> list[HolonomicInput2D]:
+        # Note the state is unused because the robot is not constrained on how it can move given its
+        # current state (i.e. holonomic)
         inputs = [
             HolonomicInput2D.GoNorth(),
             HolonomicInput2D.GoNortheast(),
