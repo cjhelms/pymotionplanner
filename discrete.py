@@ -357,8 +357,9 @@ if __name__ == "__main__":
     obstacles = [
         Obstacle([State(12, 0), State(12, 15), State(15, 15), State(15, 0)]),
         Obstacle([State(15, 12), State(15, 15), State(28, 15), State(28, 12)]),
-        Obstacle([State(15, 15), State(15, 28), State(18, 28), State(18, 15)]),
-        Obstacle([State(20, 18), State(20, 30), State(23, 30), State(23, 18)]),
+        Obstacle([State(15, 15), State(15, 25), State(18, 25), State(18, 15)]),
+        Obstacle([State(23, 18), State(23, 30), State(24, 30), State(24, 18)]),
+        Obstacle([State(3, 20), State(3, 21), State(13, 21), State(13, 20)]),
     ]
     occupancy_grid = RectangularOccupancyGrid(northwest_corner, obstacles)
     if arguments.algorithm == "breadth-first":
