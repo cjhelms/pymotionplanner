@@ -74,31 +74,6 @@ StateT = typing.TypeVar("StateT", bound=CompatibleState[typing.Any])
 MetadataT = typing.TypeVar("MetadataT")
 
 
-@dataclasses.dataclass
-class Node(typing.Generic[StateT, MetadataT]):
-    state: StateT
-    parent_node: typing.Optional[Node[StateT, MetadataT]]
-    metadata: MetadataT
-
-
-class CompatibleQueue(typing.Generic[MetadataT, StateT], typing.Protocol):
-    def put(self, node: Node[StateT, MetadataT]) -> None: ...
-    def update(self, node: Node[StateT, MetadataT]) -> None: ...
-    def pop(self) -> Node[StateT, MetadataT]: ...
-    def is_empty(self) -> bool: ...
-
-
-StateT_contra = typing.TypeVar(
-    "StateT_contra", bound=CompatibleState[typing.Any], contravariant=True
-)
-
-
-class CompatibleOccupancyGrid(typing.Generic[StateT_contra], typing.Protocol):
-    def is_occupied(self, state: StateT_contra) -> bool: ...
-    @property
-    def total_spaces(self) -> int: ...
-
-
 class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT]):
     """
     All motion planning algorithms adhere to the following pattern:
@@ -195,6 +170,31 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT]):
                     self._encountered.append(to_be_visited)
                     self._queue.put(to_be_visited)
         return (None, self._visited)
+
+
+class CompatibleQueue(typing.Generic[MetadataT, StateT], typing.Protocol):
+    def put(self, node: Node[StateT, MetadataT]) -> None: ...
+    def update(self, node: Node[StateT, MetadataT]) -> None: ...
+    def pop(self) -> Node[StateT, MetadataT]: ...
+    def is_empty(self) -> bool: ...
+
+
+StateT_contra = typing.TypeVar(
+    "StateT_contra", bound=CompatibleState[typing.Any], contravariant=True
+)
+
+
+class CompatibleOccupancyGrid(typing.Generic[StateT_contra], typing.Protocol):
+    def is_occupied(self, state: StateT_contra) -> bool: ...
+    @property
+    def total_spaces(self) -> int: ...
+
+
+@dataclasses.dataclass
+class Node(typing.Generic[StateT, MetadataT]):
+    state: StateT
+    parent_node: typing.Optional[Node[StateT, MetadataT]]
+    metadata: MetadataT
 
 
 class MotionPlanner(typing.Generic[StateT, MetadataT], abc.ABC):
