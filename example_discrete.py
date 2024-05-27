@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import pathlib
 import random
 import typing
 
@@ -77,7 +78,14 @@ def main() -> None:
     plot_visited(result.visited, axes)
     axes.grid()
     axes.legend()
-    plt.show()
+    if arguments.output is None:
+        plt.show()
+    else:
+        output_path = pathlib.Path(arguments.output)
+        output_path.mkdir(parents=True, exist_ok=True)
+        file_path = output_path / f"{arguments.algorithm}.jpg"
+        print(f"Saving results to '{file_path}'...")
+        plt.savefig(file_path)
 
 
 def parse_command_line_arguments() -> argparse.Namespace:
@@ -96,7 +104,12 @@ def parse_command_line_arguments() -> argparse.Namespace:
         "--random",
         action="store_true",
         default=False,
-        help="Shuffle inputs randomly before putting onto queue",
+        help="shuffle inputs randomly before putting onto queue",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="directory path (relative or absolute) to save results instead of drawing to screen",
     )
     return parser.parse_args()
 
