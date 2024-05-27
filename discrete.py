@@ -126,8 +126,27 @@ class RectangularOccupancyGrid:
         northwest_corner: State,
         obstacles: list[Obstacle],
     ) -> None:
-        # TODO: Encode obstacles into a 2-D matrix
         self._lookup_table = np.zeros((northwest_corner.x, northwest_corner.y))
+        for o in obstacles:
+            half_spaces = [
+                (o.vertices[i], o.vertices[(i + 1) % len(o.vertices)])
+                for i in range(len(o.vertices))
+            ]
+            for i in range(self._lookup_table.shape[0]):
+                for j in range(self._lookup_table.shape[1]):
+
+                    def point_i_j_is_left_of(half_space: tuple[State, State]) -> bool:
+                        hs_origin = np.array([half_space[0].x, half_space[0].y])
+                        hs_vector = (
+                            np.array([half_space[1].x, half_space[1].y]) - hs_origin
+                        )
+                        EPSILON = 0.01
+                        return bool(
+                            np.cross(hs_vector, np.array([i, j]) - hs_origin) < EPSILON
+                        )
+
+                    if all(point_i_j_is_left_of(hs) for hs in half_spaces):
+                        self._lookup_table[i, j] = 1
 
     def is_occupied(self, state: State) -> bool:
         if (
@@ -137,7 +156,7 @@ class RectangularOccupancyGrid:
             or state.y < 0
         ):
             return True
-        return self._lookup_table[state.x][state.y]
+        return bool(self._lookup_table[state.x][state.y])
 
     @property
     def total_spaces(self) -> int:
@@ -335,7 +354,13 @@ if __name__ == "__main__":
     initial_state = State(1, 9)
     goal_state = State(18, 1)
     northwest_corner = State(30, 30)
-    occupancy_grid = RectangularOccupancyGrid(northwest_corner, [])
+    obstacles = [
+        Obstacle([State(12, 0), State(12, 15), State(15, 15), State(15, 0)]),
+        Obstacle([State(15, 12), State(15, 15), State(28, 15), State(28, 12)]),
+        Obstacle([State(15, 15), State(15, 28), State(18, 28), State(18, 15)]),
+        Obstacle([State(20, 18), State(20, 30), State(23, 30), State(23, 18)]),
+    ]
+    occupancy_grid = RectangularOccupancyGrid(northwest_corner, obstacles)
     if arguments.algorithm == "breadth-first":
         planner = BreadthFirstMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
@@ -351,6 +376,16 @@ if __name__ == "__main__":
     if plan is None:
         print("No plan found!")
         exit(1)
+    for i, o in enumerate(obstacles):
+        pairs = [
+            (o.vertices[i], o.vertices[(i + 1) % len(o.vertices)])
+            for i in range(len(o.vertices))
+        ]
+        for j, p in enumerate(pairs):
+            v0, v1 = p
+            (line,) = plt.plot([v0.y, v1.y], [v0.x, v1.x], "-k", linewidth=2)
+            if i == 0 and j == 0:
+                line.set_label("Obstacle boundary")
     plt.plot(plan[0].y, plan[0].x, "bx", markersize=10, label="Initial state")
     plt.plot(plan[-1].y, plan[-1].x, "bo", markersize=10, label="Goal state")
     plt.plot(
