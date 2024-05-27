@@ -370,7 +370,7 @@ class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
         def pop(self) -> Node[typing.Any]:
             if len(self._stack) == 0:
                 raise RuntimeError("Stack is empty!")
-            return self._stack.pop(0)
+            return self._stack.pop(-1)
 
         def is_empty(self) -> bool:
             return len(self._stack) == 0
