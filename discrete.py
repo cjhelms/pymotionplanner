@@ -231,12 +231,21 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                 progress_bar.update(1)
                 iteration += 1
                 if iteration > self._occupancy_grid.total_spaces:
-                    # raise RuntimeError("Algorithm ran too long!")
-                    return (
-                        [State(0, 0), State(0, 0)],
-                        [e.state for e in self._encountered],
-                    )
+                    raise RuntimeError("Algorithm ran too long!")
                 self._visited.append(visiting)
+                if visiting.state == self._goal:
+                    plan: list[State] = [visiting.state]
+                    current = visiting
+
+                    # TODO: Return to caller
+                    print(visiting.metadata)
+
+                    while current.parent_node is not None:
+                        current = current.parent_node
+                        plan.append(current.state)
+                    plan.reverse()
+                    self._motion_plan = plan
+                    return (self._motion_plan, [e.state for e in self._encountered])
                 inputs = visiting.state.inputs
                 if self._do_shuffle_inputs:
                     random.shuffle(inputs)
@@ -254,15 +263,6 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                         self._queue.update(to_be_visited)
                         continue
                     self._encountered.append(to_be_visited)
-                    if to_be_visited.state == self._goal:
-                        plan: list[State] = [to_be_visited.state]
-                        current = to_be_visited
-                        while current.parent_node is not None:
-                            current = current.parent_node
-                            plan.append(current.state)
-                        plan.reverse()
-                        self._motion_plan = plan
-                        return (self._motion_plan, [e.state for e in self._encountered])
                     self._queue.put(to_be_visited)
         return (None, [e.state for e in self._encountered])
 
@@ -310,10 +310,10 @@ class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
         def __init__(self) -> None:
             self._queue = queue.Queue()
 
-        def put(self, state: Node) -> None:
+        def put(self, state: Node[typing.Any]) -> None:
             self._queue.put(state)
 
-        def update(self, state: Node) -> None:
+        def update(self, state: Node[typing.Any]) -> None:
             pass  # Do nothing
 
         def pop(self) -> Node:
@@ -323,7 +323,7 @@ class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
             return self._queue.empty()
 
     @typing_extensions.override
-    def _make_queue(self) -> CompatibleQueue:
+    def _make_queue(self) -> BreadthFirstMotionPlanner._StandardQueueWrapper:
         return self._StandardQueueWrapper()
 
 
@@ -331,27 +331,60 @@ class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
 class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
     class _Stack:
         def __init__(self) -> None:
-            self._stack: list[Node] = []
+            self._stack: list[Node[typing.Any]] = []
 
-        def put(self, state: Node) -> None:
+        def put(self, state: Node[typing.Any]) -> None:
             self._stack.append(state)
 
-        def update(self, state: Node) -> None:
+        def update(self, state: Node[typing.Any]) -> None:
             pass  # Do nothing
 
-        def pop(self) -> Node:
+        def pop(self) -> Node[typing.Any]:
             if len(self._stack) == 0:
                 raise RuntimeError("Stack is empty!")
-            state = self._stack[-1]
-            self._stack = self._stack[:-1]
-            return state
+            return self._stack.pop(0)
 
         def is_empty(self) -> bool:
             return len(self._stack) == 0
 
     @typing_extensions.override
-    def _make_queue(self) -> CompatibleQueue:
+    def _make_queue(self) -> DepthFirstMotionPlanner._Stack:
         return self._Stack()
+
+
+class DijkstraMotionPlanner(MotionPlanner[int]):
+    class _PriorityQueue:
+        def __init__(self) -> None:
+            self._queue: list[Node[int]] = []
+
+        def put(self, state: Node[int]) -> None:
+            state.metadata = (
+                state.parent_node.metadata + 1 if state.parent_node is not None else 0
+            )
+            self._queue.append(state)
+            self._queue.sort(key=lambda x: x.metadata)
+
+        def update(self, state: Node[int]) -> None:
+            queue_index = [n.state for n in self._queue].index(state.state)
+            self._queue.pop(queue_index)
+            self.put(state)
+
+        def pop(self) -> Node[int]:
+            if len(self._queue) == 0:
+                raise RuntimeError("Queue is empty!")
+            return self._queue.pop(0)
+
+        def is_empty(self) -> bool:
+            return len(self._queue) == 0
+
+    @typing_extensions.override
+    def _make_queue(self) -> DijkstraMotionPlanner._PriorityQueue:
+        return self._PriorityQueue()
+
+    @property
+    @typing_extensions.override
+    def _metadata_class(self) -> typing.Type[int]:
+        return int
 
 
 if __name__ == "__main__":
@@ -360,7 +393,7 @@ if __name__ == "__main__":
         "-a",
         "--algorithm",
         required=True,
-        choices=["breadth-first", "depth-first"],
+        choices=["breadth-first", "depth-first", "dijkstra"],
         help="algorithm to be used for planning",
     )
     parser.add_argument(
@@ -388,6 +421,10 @@ if __name__ == "__main__":
         )
     elif arguments.algorithm == "depth-first":
         planner = DepthFirstMotionPlanner(
+            initial_state, goal_state, occupancy_grid, arguments.random
+        )
+    elif arguments.algorithm == "dijkstra":
+        planner = DijkstraMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
         )
     else:
