@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import random
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,11 +11,14 @@ import discrete
 
 
 class HolonomicRobot2D:
+    def __init__(self, do_shuffle_inputs: bool) -> None:
+        self._do_shuffle_inputs = do_shuffle_inputs
+
     def transition(self, state: State2D, input: HolonomicInput2D) -> State2D:
         return State2D(state.x + input.dx, state.y + input.dy)
 
     def get_inputs(self, state: State2D) -> list[HolonomicInput2D]:
-        return [
+        inputs = [
             HolonomicInput2D.GoNorth(),
             HolonomicInput2D.GoNortheast(),
             HolonomicInput2D.GoEast(),
@@ -24,6 +28,9 @@ class HolonomicRobot2D:
             HolonomicInput2D.GoWest(),
             HolonomicInput2D.GoNorthwest(),
         ]
+        if self._do_shuffle_inputs:
+            random.shuffle(inputs)
+        return inputs
 
 
 @dataclasses.dataclass
@@ -158,40 +165,23 @@ if __name__ == "__main__":
         Obstacle2D([State2D(3, 20), State2D(3, 21), State2D(13, 21), State2D(13, 20)]),
     ]
     occupancy_grid = RectangularOccupancyGrid2D(northwest_corner, obstacles)
+    settings = (
+        HolonomicRobot2D(arguments.random),
+        initial_state,
+        goal_state,
+        occupancy_grid,
+    )
     if arguments.algorithm == "breadth-first":
-        motion_planner = discrete.BreadthFirstMotionPlanner(
-            HolonomicRobot2D(),
-            initial_state,
-            goal_state,
-            occupancy_grid,
-            arguments.random,
-        )
+        motion_planner = discrete.BreadthFirstMotionPlanner(*settings)
     elif arguments.algorithm == "depth-first":
-        motion_planner = discrete.DepthFirstMotionPlanner(
-            HolonomicRobot2D(),
-            initial_state,
-            goal_state,
-            occupancy_grid,
-            arguments.random,  # TODO: Move arg out to HolonomicRobot2D
-        )
+        motion_planner = discrete.DepthFirstMotionPlanner(*settings)
     elif arguments.algorithm == "dijkstra":
-        motion_planner = discrete.DijkstraMotionPlanner(
-            distance_between,
-            HolonomicRobot2D(),
-            initial_state,
-            goal_state,
-            occupancy_grid,
-            arguments.random,
-        )
+        motion_planner = discrete.DijkstraMotionPlanner(distance_between, *settings)
     elif arguments.algorithm == "astar":
         motion_planner = discrete.AStarMotionPlanner(
             lambda state: distance_between(goal_state, state),
             distance_between,
-            HolonomicRobot2D(),
-            initial_state,
-            goal_state,
-            occupancy_grid,
-            arguments.random,
+            *settings,
         )
     else:
         print(f"Unrecognized planner: {arguments.algorithm}")

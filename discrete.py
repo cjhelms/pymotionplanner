@@ -107,12 +107,10 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         initial_state: StateT,
         goal: StateT,
         occupancy_grid: CompatibleOccupancyGrid,
-        do_shuffle_inputs: bool,
     ) -> None:
         self.__robot = robot
         self.__goal = goal
         self.__occupancy_grid = occupancy_grid
-        self.__do_shuffle_inputs = do_shuffle_inputs
         self.__to_be_visited = self._make_node_data_structure()
         self.__motion_plan: typing.Optional[list[Node[StateT, MetadataT]]] = None
         first_to_be_visisted = Node(initial_state, None, self._metadata_class())
@@ -164,8 +162,6 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
                     self.__motion_plan = plan
                     return (self.__motion_plan, self.__visited)
                 inputs = self.__robot.get_inputs(visiting.state)
-                if self.__do_shuffle_inputs:
-                    random.shuffle(inputs)
                 for input in inputs:
                     to_be_visited = Node(
                         self.__robot.transition(visiting.state, input),
