@@ -126,6 +126,9 @@ class State:
             Input.GoNorthwest(),
         ]
 
+    def distance_to(self, other: State) -> float:
+        return np.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
+
 
 @dataclasses.dataclass
 class Obstacle:
@@ -380,24 +383,15 @@ class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
         return self._Stack()
 
 
-class DijkstraMotionPlanner(MotionPlanner[float]):
+class CostBasedMotionPlanner(MotionPlanner[float], abc.ABC):
     class _PriorityQueue:
-        def __init__(self) -> None:
+        def __init__(self, compute_cost: typing.Callable[[Node[float]], None]) -> None:
             self._queue: list[Node[float]] = []
+            self._compute_cost = compute_cost
 
         def put(self, node: Node[float]) -> None:
             self._compute_cost(node)
             self._put(node)
-
-        def _compute_cost(self, node: Node[float]) -> None:
-            if node.parent_node is None:
-                node.metadata = 0.0
-            else:
-                distance_traveled = np.sqrt(
-                    (node.parent_node.state.x - node.state.x) ** 2
-                    + (node.parent_node.state.y - node.state.y) ** 2
-                )
-                node.metadata = node.parent_node.metadata + distance_traveled
 
         def _put(self, node: Node[float]) -> None:
             self._queue.append(node)
@@ -419,13 +413,48 @@ class DijkstraMotionPlanner(MotionPlanner[float]):
             return len(self._queue) == 0
 
     @typing_extensions.override
-    def _make_queue(self) -> DijkstraMotionPlanner._PriorityQueue:
-        return self._PriorityQueue()
+    def _make_queue(self) -> CostBasedMotionPlanner._PriorityQueue:
+        return self._PriorityQueue(self._compute_cost)
+
+    @abc.abstractmethod
+    def _compute_cost(self, node: Node[float]) -> None:
+        raise NotImplementedError()
 
     @property
     @typing_extensions.override
-    def _metadata_class(self) -> typing.Type[int]:
-        return int
+    def _metadata_class(self) -> typing.Type[float]:
+        return float
+
+
+@typing.final
+class DijkstraMotionPlanner(CostBasedMotionPlanner):
+    @typing_extensions.override
+    def _compute_cost(self, node: Node[float]) -> None:
+        if node.parent_node is None:
+            node.metadata = 0.0
+        else:
+            node.metadata = (
+                node.parent_node.metadata
+                + node.parent_node.state.distance_to(node.state)
+            )
+
+
+@typing.final
+class AStarMotionPlanner(CostBasedMotionPlanner):
+    def __init__(self, *args, **kwargs) -> None:
+        self._goal: State = args[1]
+        super().__init__(*args, **kwargs)
+
+    @typing_extensions.override
+    def _compute_cost(self, node: Node[float]) -> None:
+        if node.parent_node is None:
+            node.metadata = 0.0
+        else:
+            node.metadata = (
+                node.parent_node.metadata
+                + node.parent_node.state.distance_to(node.state)
+                + self._goal.distance_to(node.state)
+            )
 
 
 if __name__ == "__main__":
@@ -434,7 +463,7 @@ if __name__ == "__main__":
         "-a",
         "--algorithm",
         required=True,
-        choices=["breadth-first", "depth-first", "dijkstra"],
+        choices=["breadth-first", "depth-first", "dijkstra", "astar"],
         help="algorithm to be used for planning",
     )
     parser.add_argument(
@@ -466,6 +495,10 @@ if __name__ == "__main__":
         )
     elif arguments.algorithm == "dijkstra":
         motion_planner = DijkstraMotionPlanner(
+            initial_state, goal_state, occupancy_grid, arguments.random
+        )
+    elif arguments.algorithm == "astar":
+        motion_planner = AStarMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
         )
     else:
