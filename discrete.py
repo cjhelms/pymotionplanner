@@ -77,16 +77,32 @@ class Input:
         return Input(1, 0)
 
     @staticmethod
+    def GoNortheast() -> Input:
+        return Input(1, 1)
+
+    @staticmethod
     def GoEast() -> Input:
         return Input(0, 1)
+
+    @staticmethod
+    def GoSoutheast() -> Input:
+        return Input(-1, 1)
 
     @staticmethod
     def GoSouth() -> Input:
         return Input(-1, 0)
 
     @staticmethod
+    def GoSouthwest() -> Input:
+        return Input(-1, -1)
+
+    @staticmethod
     def GoWest() -> Input:
         return Input(0, -1)
+
+    @staticmethod
+    def GoNorthwest() -> Input:
+        return Input(1, -1)
 
 
 @dataclasses.dataclass
@@ -99,7 +115,16 @@ class State:
 
     @property
     def inputs(self) -> list[Input]:
-        return [Input.GoNorth(), Input.GoEast(), Input.GoSouth(), Input.GoWest()]
+        return [
+            Input.GoNorth(),
+            Input.GoNortheast(),
+            Input.GoEast(),
+            Input.GoSoutheast(),
+            Input.GoSouth(),
+            Input.GoSouthwest(),
+            Input.GoWest(),
+            Input.GoNorthwest(),
+        ]
 
 
 @dataclasses.dataclass
@@ -228,6 +253,9 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                 visiting = self._queue.pop()
                 if visiting in self._visited:
                     continue
+                # The progress bar shows how many nodes out of all possible have been processed, so
+                # the algorithm may successfully terminate before the progress bar shows 100% and,
+                # further, reaching 100% likely will correspond to failure to find a motion plan
                 progress_bar.update(1)
                 iteration += 1
                 if iteration > self._occupancy_grid.total_spaces:
@@ -352,24 +380,37 @@ class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
         return self._Stack()
 
 
-class DijkstraMotionPlanner(MotionPlanner[int]):
+class DijkstraMotionPlanner(MotionPlanner[float]):
     class _PriorityQueue:
         def __init__(self) -> None:
-            self._queue: list[Node[int]] = []
+            self._queue: list[Node[float]] = []
 
-        def put(self, node: Node[int]) -> None:
-            node.metadata = (
-                node.parent_node.metadata + 1 if node.parent_node is not None else 0
-            )
+        def put(self, node: Node[float]) -> None:
+            self._compute_cost(node)
+            self._put(node)
+
+        def _compute_cost(self, node: Node[float]) -> None:
+            if node.parent_node is None:
+                node.metadata = 0.0
+            else:
+                distance_traveled = np.sqrt(
+                    (node.parent_node.state.x - node.state.x) ** 2
+                    + (node.parent_node.state.y - node.state.y) ** 2
+                )
+                node.metadata = node.parent_node.metadata + distance_traveled
+
+        def _put(self, node: Node[float]) -> None:
             self._queue.append(node)
             self._queue.sort(key=lambda x: x.metadata)
 
-        def update(self, node: Node[int]) -> None:
+        def update(self, node: Node[float]) -> None:
             queue_index = [n.state for n in self._queue].index(node.state)
-            self._queue.pop(queue_index)
-            self.put(node)
+            self._compute_cost(node)
+            if self._queue[queue_index].metadata > node.metadata:
+                self._queue.pop(queue_index)
+                self._put(node)
 
-        def pop(self) -> Node[int]:
+        def pop(self) -> Node[float]:
             if len(self._queue) == 0:
                 raise RuntimeError("Queue is empty!")
             return self._queue.pop(0)
