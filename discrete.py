@@ -150,17 +150,20 @@ class RectangularOccupancyGrid:
         return self._lookup_table.size
 
 
+T = typing.TypeVar("T")
+
+
 @dataclasses.dataclass
-class Node:
+class Node(typing.Generic[T]):
     state: State
-    parent_node: typing.Optional[Node] = None
-    metadata: dict[str, typing.Any] = dataclasses.field(default_factory=dict)
+    parent_node: typing.Optional[Node[T]]
+    metadata: T
 
 
-class CompatibleQueue(typing.Protocol):
-    def put(self, state: Node) -> None: ...
-    def update(self, state: Node) -> None: ...
-    def pop(self) -> Node: ...
+class CompatibleQueue(typing.Generic[T], typing.Protocol):
+    def put(self, state: Node[T]) -> None: ...
+    def update(self, state: Node[T]) -> None: ...
+    def pop(self) -> Node[T]: ...
     def is_empty(self) -> bool: ...
 
 
@@ -170,7 +173,7 @@ class CompatibleOccupancyGrid(typing.Protocol):
     def total_spaces(self) -> int: ...
 
 
-class ForwardSearchAlgorithm:
+class ForwardSearchAlgorithm(typing.Generic[T]):
     """
     All motion planning algorithms adhere to the following pattern:
 
@@ -198,20 +201,22 @@ class ForwardSearchAlgorithm:
     def __init__(
         self,
         queue: CompatibleQueue,
+        metadata_class: typing.Type[T],
         initial_state: State,
         goal: State,
         occupancy_grid: CompatibleOccupancyGrid,
         do_shuffle_inputs: bool,
     ) -> None:
         self._queue = queue
+        self._metadata_class = metadata_class
         self._goal = goal
         self._occupancy_grid = occupancy_grid
         self._do_shuffle_inputs = do_shuffle_inputs
         self._motion_plan: typing.Optional[list[State]] = None
-        first_to_be_visisted = Node(initial_state)
+        first_to_be_visisted = Node(initial_state, None, self._metadata_class())
         self._queue.put(first_to_be_visisted)
         self._encountered = [first_to_be_visisted]
-        self._visited: list[Node] = []
+        self._visited: list[Node[T]] = []
 
     def search(self) -> tuple[typing.Optional[list[State]], list[State]]:
         if self._queue.is_empty():
@@ -236,7 +241,11 @@ class ForwardSearchAlgorithm:
                 if self._do_shuffle_inputs:
                     random.shuffle(inputs)
                 for input in inputs:
-                    to_be_visited = Node(visiting.state.transition(input), visiting)
+                    to_be_visited = Node(
+                        visiting.state.transition(input),
+                        visiting,
+                        self._metadata_class(),
+                    )
                     if self._occupancy_grid.is_occupied(
                         to_be_visited.state
                     ) or to_be_visited.state in [v.state for v in self._visited]:
@@ -258,7 +267,7 @@ class ForwardSearchAlgorithm:
         return (None, [e.state for e in self._encountered])
 
 
-class MotionPlanner(abc.ABC):
+class MotionPlanner(typing.Generic[T], abc.ABC):
     def __init__(
         self,
         initial_state: State,
@@ -267,19 +276,36 @@ class MotionPlanner(abc.ABC):
         do_shuffle_inputs: bool,
     ) -> None:
         self._forward_search_algorithm = ForwardSearchAlgorithm(
-            self._make_queue(), initial_state, goal, occupancy_grid, do_shuffle_inputs
+            self._make_queue(),
+            self._metadata_class,
+            initial_state,
+            goal,
+            occupancy_grid,
+            do_shuffle_inputs,
         )
 
     @abc.abstractmethod
     def _make_queue(self) -> CompatibleQueue:
         raise NotImplementedError()
 
+    @property
+    @abc.abstractmethod
+    def _metadata_class(self) -> typing.Type[T]:
+        raise NotImplementedError()
+
     def search(self) -> tuple[typing.Optional[list[State]], list[State]]:
         return self._forward_search_algorithm.search()
 
 
+class MotionPlannerNoMetadata(MotionPlanner[object], abc.ABC):
+    @property
+    @typing_extensions.override
+    def _metadata_class(self) -> typing.Type[object]:
+        return object
+
+
 @typing.final
-class BreadthFirstMotionPlanner(MotionPlanner):
+class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
     class _StandardQueueWrapper:
         def __init__(self) -> None:
             self._queue = queue.Queue()
@@ -302,7 +328,7 @@ class BreadthFirstMotionPlanner(MotionPlanner):
 
 
 @typing.final
-class DepthFirstMotionPlanner(MotionPlanner):
+class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
     class _Stack:
         def __init__(self) -> None:
             self._stack: list[Node] = []
