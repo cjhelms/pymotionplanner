@@ -187,27 +187,28 @@ class Settings:
         )
 
 
-if __name__ == "__main__":
-    arguments = parse_command_line_arguments()
-    settings = make_settings(arguments.random)
-    if arguments.algorithm == "breadth-first":
-        motion_planner = discrete.BreadthFirstMotionPlanner(*settings.make_tuple())
-    elif arguments.algorithm == "depth-first":
-        motion_planner = discrete.DepthFirstMotionPlanner(*settings.make_tuple())
-    elif arguments.algorithm == "dijkstra":
-        motion_planner = discrete.DijkstraMotionPlanner(
-            distance_between, *settings.make_tuple()
-        )
-    elif arguments.algorithm == "astar":
-        motion_planner = discrete.AStarMotionPlanner(
+def make_motion_planner(algorithm: str) -> discrete.ForwardSearchAlgorithm:
+    if algorithm == "breadth-first":
+        return discrete.BreadthFirstMotionPlanner(*settings.make_tuple())
+    elif algorithm == "depth-first":
+        return discrete.DepthFirstMotionPlanner(*settings.make_tuple())
+    elif algorithm == "dijkstra":
+        return discrete.DijkstraMotionPlanner(distance_between, *settings.make_tuple())
+    elif algorithm == "astar":
+        return discrete.AStarMotionPlanner(
             lambda state: distance_between(settings.goal_state, state),
             distance_between,
             *settings.make_tuple(),
         )
-    else:
-        print(f"Unrecognized planner: {arguments.algorithm}")
-        exit(1)
-    motion_plan, visited = motion_planner.search()
+    print(f"Unrecognized planner: {algorithm}")
+    exit(1)
+
+
+if __name__ == "__main__":
+    arguments = parse_command_line_arguments()
+    settings = make_settings(arguments.random)
+    motion_planner = make_motion_planner(arguments.algorithm)
+    motion_plan, visited_nodes = motion_planner.search()
     if motion_plan is None:
         print("No plan found!")
         exit(1)
@@ -242,8 +243,8 @@ if __name__ == "__main__":
         label="Motion plan",
     )
     plt.scatter(
-        [node.state.y for node in visited],
-        [node.state.x for node in visited],
+        [node.state.y for node in visited_nodes],
+        [node.state.x for node in visited_nodes],
         c="r",
         marker="x",
         label="Encountered state",
