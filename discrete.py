@@ -103,19 +103,6 @@ class State:
 
 
 @dataclasses.dataclass
-class ParentedState:
-    state: State
-    parent_id: int
-
-    @staticmethod
-    def make_with_no_parent(state: State) -> ParentedState:
-        return ParentedState(state, -1)
-
-    def has_parent(self) -> bool:
-        return self.parent_id != -1
-
-
-@dataclasses.dataclass
 class Obstacle:
     vertices: list[State]
 
@@ -163,9 +150,17 @@ class RectangularOccupancyGrid:
         return self._lookup_table.size
 
 
+@dataclasses.dataclass
+class Node:
+    state: State
+    parent_node: typing.Optional[Node] = None
+    metadata: dict[str, typing.Any] = dataclasses.field(default_factory=dict)
+
+
 class CompatibleQueue(typing.Protocol):
-    def put(self, state: ParentedState) -> None: ...
-    def pop(self) -> ParentedState: ...
+    def put(self, state: Node) -> None: ...
+    def update(self, state: Node) -> None: ...
+    def pop(self) -> Node: ...
     def is_empty(self) -> bool: ...
 
 
@@ -213,10 +208,10 @@ class ForwardSearchAlgorithm:
         self._occupancy_grid = occupancy_grid
         self._do_shuffle_inputs = do_shuffle_inputs
         self._motion_plan: typing.Optional[list[State]] = None
-        first_to_be_visisted = ParentedState.make_with_no_parent(initial_state)
+        first_to_be_visisted = Node(initial_state)
         self._queue.put(first_to_be_visisted)
         self._encountered = [first_to_be_visisted]
-        self._visited_encountered_indices: list[int] = []
+        self._visited: list[Node] = []
 
     def search(self) -> tuple[typing.Optional[list[State]], list[State]]:
         if self._queue.is_empty():
@@ -226,48 +221,41 @@ class ForwardSearchAlgorithm:
         with tqdm.tqdm(total=self._occupancy_grid.total_spaces) as progress_bar:
             while not self._queue.is_empty():
                 visiting = self._queue.pop()
-                visiting_encountered_index = self._encountered.index(visiting)
-                if any(
-                    [
-                        visiting.state == self._encountered[i].state
-                        for i in self._visited_encountered_indices
-                    ]
-                ):
+                if visiting in self._visited:
                     continue
                 progress_bar.update(1)
                 iteration += 1
                 if iteration > self._occupancy_grid.total_spaces:
-                    raise RuntimeError("Algorithm ran too long!")
-                self._visited_encountered_indices.append(visiting_encountered_index)
+                    # raise RuntimeError("Algorithm ran too long!")
+                    return (
+                        [State(0, 0), State(0, 0)],
+                        [e.state for e in self._encountered],
+                    )
+                self._visited.append(visiting)
                 inputs = visiting.state.inputs
                 if self._do_shuffle_inputs:
                     random.shuffle(inputs)
                 for input in inputs:
-                    to_be_visited = ParentedState(
-                        visiting.state.transition(input), visiting_encountered_index
-                    )
-                    if self._occupancy_grid.is_occupied(to_be_visited.state) or any(
-                        [
-                            to_be_visited.state == self._encountered[i].state
-                            for i in self._visited_encountered_indices
-                        ]
-                    ):
+                    to_be_visited = Node(visiting.state.transition(input), visiting)
+                    if self._occupancy_grid.is_occupied(
+                        to_be_visited.state
+                    ) or to_be_visited.state in [v.state for v in self._visited]:
+                        continue
+                    if to_be_visited.state in [e.state for e in self._encountered]:
+                        self._queue.update(to_be_visited)
                         continue
                     self._encountered.append(to_be_visited)
                     if to_be_visited.state == self._goal:
                         plan: list[State] = [to_be_visited.state]
                         current = to_be_visited
-                        while current.has_parent():
-                            current = self._encountered[current.parent_id]
+                        while current.parent_node is not None:
+                            current = current.parent_node
                             plan.append(current.state)
                         plan.reverse()
                         self._motion_plan = plan
                         return (self._motion_plan, [e.state for e in self._encountered])
                     self._queue.put(to_be_visited)
-        return (
-            None,
-            [encountered.state for encountered in self._encountered],
-        )
+        return (None, [e.state for e in self._encountered])
 
 
 class MotionPlanner(abc.ABC):
@@ -296,10 +284,13 @@ class BreadthFirstMotionPlanner(MotionPlanner):
         def __init__(self) -> None:
             self._queue = queue.Queue()
 
-        def put(self, state: ParentedState) -> None:
+        def put(self, state: Node) -> None:
             self._queue.put(state)
 
-        def pop(self) -> ParentedState:
+        def update(self, state: Node) -> None:
+            pass  # Do nothing
+
+        def pop(self) -> Node:
             return self._queue.get_nowait()
 
         def is_empty(self) -> bool:
@@ -314,12 +305,15 @@ class BreadthFirstMotionPlanner(MotionPlanner):
 class DepthFirstMotionPlanner(MotionPlanner):
     class _Stack:
         def __init__(self) -> None:
-            self._stack: list[ParentedState] = []
+            self._stack: list[Node] = []
 
-        def put(self, state: ParentedState) -> None:
+        def put(self, state: Node) -> None:
             self._stack.append(state)
 
-        def pop(self) -> ParentedState:
+        def update(self, state: Node) -> None:
+            pass  # Do nothing
+
+        def pop(self) -> Node:
             if len(self._stack) == 0:
                 raise RuntimeError("Stack is empty!")
             state = self._stack[-1]
