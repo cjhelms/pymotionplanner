@@ -63,20 +63,20 @@ import typing
 import tqdm
 import typing_extensions
 
+StateT = typing.TypeVar("StateT")
 InputT = typing.TypeVar("InputT")
 
 
-class CompatibleState(typing.Generic[InputT], typing.Protocol):
-    def transition(self, input: InputT) -> typing_extensions.Self: ...
-    @property
-    def inputs(self) -> list[InputT]: ...
+class CompatibleRobot(typing.Generic[StateT, InputT], typing.Protocol):
+    def transition(self, state: StateT, input: InputT) -> StateT: ...
+    def get_inputs(self, state: StateT) -> list[InputT]: ...
 
 
-StateT = typing.TypeVar("StateT", bound=CompatibleState[typing.Any])
+RobotT = typing.TypeVar("RobotT", bound=CompatibleRobot[typing.Any, typing.Any])
 MetadataT = typing.TypeVar("MetadataT")
 
 
-class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT], abc.ABC):
+class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC):
     """
     All motion planning algorithms adhere to the following pattern:
 
@@ -103,11 +103,13 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT], abc.ABC):
 
     def __init__(
         self,
+        robot: CompatibleRobot[StateT, InputT],
         initial_state: StateT,
         goal: StateT,
         occupancy_grid: CompatibleOccupancyGrid,
         do_shuffle_inputs: bool,
     ) -> None:
+        self.__robot = robot
         self.__goal = goal
         self.__occupancy_grid = occupancy_grid
         self.__do_shuffle_inputs = do_shuffle_inputs
@@ -161,12 +163,12 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT], abc.ABC):
                     plan.reverse()
                     self.__motion_plan = plan
                     return (self.__motion_plan, self.__visited)
-                inputs = visiting.state.inputs
+                inputs = self.__robot.get_inputs(visiting.state)
                 if self.__do_shuffle_inputs:
                     random.shuffle(inputs)
                 for input in inputs:
                     to_be_visited = Node(
-                        visiting.state.transition(input),
+                        self.__robot.transition(visiting.state, input),
                         visiting,
                         self._metadata_class(),
                     )
@@ -189,9 +191,7 @@ class CompatibleNodeDataStructure(typing.Generic[MetadataT, StateT], typing.Prot
     def is_empty(self) -> bool: ...
 
 
-StateT_contra = typing.TypeVar(
-    "StateT_contra", bound=CompatibleState[typing.Any], contravariant=True
-)
+StateT_contra = typing.TypeVar("StateT_contra", contravariant=True)
 
 
 class CompatibleOccupancyGrid(typing.Generic[StateT_contra], typing.Protocol):
@@ -213,7 +213,7 @@ class NoMetadata:
 
 
 @typing.final
-class BreadthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, NoMetadata]):
+class BreadthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadata]):
     @typing_extensions.override
     def _make_node_data_structure(self) -> NodeQueue[StateT]:
         return NodeQueue()
@@ -247,7 +247,7 @@ class NodeQueue(NoUpdateNodeDataStructure[StateT, NoMetadata]):
 
 
 @typing.final
-class DepthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, NoMetadata]):
+class DepthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadata]):
     @typing_extensions.override
     def _make_node_data_structure(self) -> NodeStack[StateT]:
         return NodeStack()
@@ -275,7 +275,7 @@ class NodeStack(NoUpdateNodeDataStructure[StateT, NoMetadata]):
 
 
 @typing.final
-class DijkstraMotionPlanner(ForwardSearchAlgorithm[StateT, float]):
+class DijkstraMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
     def __init__(
         self, cost_to_come: typing.Callable[[StateT, StateT], float], *args, **kwargs
     ) -> None:
@@ -339,7 +339,7 @@ class DijkstraPriorityNodeQueue(PriorityNodeQueue[StateT]):
 
 
 @typing.final
-class AStarMotionPlanner(ForwardSearchAlgorithm[StateT, float]):
+class AStarMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
     def __init__(
         self,
         cost_to_go: typing.Callable[[StateT], float],
