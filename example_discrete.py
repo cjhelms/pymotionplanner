@@ -78,6 +78,9 @@ def main() -> None:
     plot_visited(result.visited, axes)
     axes.grid()
     axes.legend()
+    axes.set_title(f"Results ({arguments.algorithm})")
+    axes.set_xlabel("y")
+    axes.set_ylabel("x")
     if arguments.output is None:
         plt.show()
     else:
