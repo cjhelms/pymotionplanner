@@ -200,7 +200,12 @@ if __name__ == "__main__":
         )
     elif arguments.algorithm == "astar":
         motion_planner = discrete.AStarMotionPlanner(
-            distance_to, initial_state, goal_state, occupancy_grid, arguments.random
+            lambda state: distance_to(goal_state, state),
+            distance_to,
+            initial_state,
+            goal_state,
+            occupancy_grid,
+            arguments.random,
         )
     else:
         print(f"Unrecognized planner: {arguments.algorithm}")
