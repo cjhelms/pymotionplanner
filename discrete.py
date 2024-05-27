@@ -57,7 +57,6 @@ from __future__ import annotations
 import abc
 import dataclasses
 import queue
-import random
 import typing
 
 import tqdm
@@ -130,14 +129,10 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         raise NotImplementedError()
 
     @typing.final
-    def search(
-        self,
-    ) -> tuple[
-        typing.Optional[list[Node[StateT, MetadataT]]], list[Node[StateT, MetadataT]]
-    ]:
+    def search(self) -> SearchResult[StateT, MetadataT]:
         if self.__to_be_visited.is_empty():
             # The queue is only empty if the search has already been run
-            return (self.__motion_plan, self.__visited)
+            return SearchResult(self.__motion_plan, self.__visited)
         iteration = 0
         with tqdm.tqdm(total=self.__occupancy_grid.total_spaces) as progress_bar:
             while not self.__to_be_visited.is_empty():
@@ -160,7 +155,7 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
                         plan.append(current)
                     plan.reverse()
                     self.__motion_plan = plan
-                    return (self.__motion_plan, self.__visited)
+                    return SearchResult(self.__motion_plan, self.__visited)
                 inputs = self.__robot.get_inputs(visiting.state)
                 for input in inputs:
                     to_be_visited = Node(
@@ -177,7 +172,13 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
                         continue
                     self.__encountered.append(to_be_visited)
                     self.__to_be_visited.put(to_be_visited)
-        return (None, self.__visited)
+        return SearchResult(None, self.__visited)
+
+
+@dataclasses.dataclass
+class SearchResult(typing.Generic[StateT, MetadataT]):
+    motion_plan: typing.Optional[list[Node[StateT, MetadataT]]]
+    visited: list[Node[StateT, MetadataT]]
 
 
 class CompatibleNodeDataStructure(typing.Generic[MetadataT, StateT], typing.Protocol):
