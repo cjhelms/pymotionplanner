@@ -146,11 +146,10 @@ def parse_command_line_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    arguments = parse_command_line_arguments()
+def make_settings(do_shuffle_inputs: bool) -> Settings:
     initial_state = State2D(1, 9)
     goal_state = State2D(18, 1)
-    northwest_corner = State2D(30, 30)
+    world_northwest_corner = State2D(30, 30)
     obstacles = [
         Obstacle2D([State2D(12, 0), State2D(12, 15), State2D(15, 15), State2D(15, 0)]),
         Obstacle2D(
@@ -164,24 +163,46 @@ if __name__ == "__main__":
         ),
         Obstacle2D([State2D(3, 20), State2D(3, 21), State2D(13, 21), State2D(13, 20)]),
     ]
-    occupancy_grid = RectangularOccupancyGrid2D(northwest_corner, obstacles)
-    settings = (
-        HolonomicRobot2D(arguments.random),
-        initial_state,
-        goal_state,
-        occupancy_grid,
+    return Settings(
+        do_shuffle_inputs, initial_state, goal_state, world_northwest_corner, obstacles
     )
+
+
+@dataclasses.dataclass
+class Settings:
+    do_shuffle_inputs: bool
+    initial_state: State2D
+    goal_state: State2D
+    world_northwest_corner: State2D
+    obstacles: list[Obstacle2D]
+
+    def make_tuple(
+        self,
+    ) -> tuple[HolonomicRobot2D, State2D, State2D, RectangularOccupancyGrid2D]:
+        return (
+            HolonomicRobot2D(self.do_shuffle_inputs),
+            self.initial_state,
+            self.goal_state,
+            RectangularOccupancyGrid2D(self.world_northwest_corner, self.obstacles),
+        )
+
+
+if __name__ == "__main__":
+    arguments = parse_command_line_arguments()
+    settings = make_settings(arguments.random)
     if arguments.algorithm == "breadth-first":
-        motion_planner = discrete.BreadthFirstMotionPlanner(*settings)
+        motion_planner = discrete.BreadthFirstMotionPlanner(*settings.make_tuple())
     elif arguments.algorithm == "depth-first":
-        motion_planner = discrete.DepthFirstMotionPlanner(*settings)
+        motion_planner = discrete.DepthFirstMotionPlanner(*settings.make_tuple())
     elif arguments.algorithm == "dijkstra":
-        motion_planner = discrete.DijkstraMotionPlanner(distance_between, *settings)
+        motion_planner = discrete.DijkstraMotionPlanner(
+            distance_between, *settings.make_tuple()
+        )
     elif arguments.algorithm == "astar":
         motion_planner = discrete.AStarMotionPlanner(
-            lambda state: distance_between(goal_state, state),
+            lambda state: distance_between(settings.goal_state, state),
             distance_between,
-            *settings,
+            *settings.make_tuple(),
         )
     else:
         print(f"Unrecognized planner: {arguments.algorithm}")
@@ -190,7 +211,7 @@ if __name__ == "__main__":
     if motion_plan is None:
         print("No plan found!")
         exit(1)
-    for i, o in enumerate(obstacles):
+    for i, o in enumerate(settings.obstacles):
         pairs = [
             (o.vertices[i], o.vertices[(i + 1) % len(o.vertices)])
             for i in range(len(o.vertices))
@@ -227,8 +248,8 @@ if __name__ == "__main__":
         marker="x",
         label="Encountered state",
     )
-    plt.xlim([-1, northwest_corner.y])
-    plt.ylim([-1, northwest_corner.x])
+    plt.xlim([-1, settings.world_northwest_corner.y])
+    plt.ylim([-1, settings.world_northwest_corner.x])
     plt.grid()
     plt.legend()
     plt.show()
