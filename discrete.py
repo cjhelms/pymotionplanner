@@ -212,16 +212,16 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
         self._goal = goal
         self._occupancy_grid = occupancy_grid
         self._do_shuffle_inputs = do_shuffle_inputs
-        self._motion_plan: typing.Optional[list[State]] = None
+        self._motion_plan: typing.Optional[list[Node[T]]] = None
         first_to_be_visisted = Node(initial_state, None, self._metadata_class())
         self._queue.put(first_to_be_visisted)
         self._encountered = [first_to_be_visisted]
         self._visited: list[Node[T]] = []
 
-    def search(self) -> tuple[typing.Optional[list[State]], list[State]]:
+    def search(self) -> tuple[typing.Optional[list[Node[T]]], list[Node[T]]]:
         if self._queue.is_empty():
             # The queue is only empty if the search has already been run
-            return (self._motion_plan, [e.state for e in self._encountered])
+            return (self._motion_plan, self._visited)
         iteration = 0
         with tqdm.tqdm(total=self._occupancy_grid.total_spaces) as progress_bar:
             while not self._queue.is_empty():
@@ -234,18 +234,14 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                     raise RuntimeError("Algorithm ran too long!")
                 self._visited.append(visiting)
                 if visiting.state == self._goal:
-                    plan: list[State] = [visiting.state]
+                    plan: list[Node[T]] = [visiting]
                     current = visiting
-
-                    # TODO: Return to caller
-                    print(visiting.metadata)
-
                     while current.parent_node is not None:
                         current = current.parent_node
-                        plan.append(current.state)
+                        plan.append(current)
                     plan.reverse()
                     self._motion_plan = plan
-                    return (self._motion_plan, [e.state for e in self._encountered])
+                    return (self._motion_plan, self._visited)
                 inputs = visiting.state.inputs
                 if self._do_shuffle_inputs:
                     random.shuffle(inputs)
@@ -264,7 +260,7 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                         continue
                     self._encountered.append(to_be_visited)
                     self._queue.put(to_be_visited)
-        return (None, [e.state for e in self._encountered])
+        return (None, self._visited)
 
 
 class MotionPlanner(typing.Generic[T], abc.ABC):
@@ -293,15 +289,19 @@ class MotionPlanner(typing.Generic[T], abc.ABC):
     def _metadata_class(self) -> typing.Type[T]:
         raise NotImplementedError()
 
-    def search(self) -> tuple[typing.Optional[list[State]], list[State]]:
+    def search(self) -> tuple[typing.Optional[list[Node[T]]], list[Node[T]]]:
         return self._forward_search_algorithm.search()
 
 
 class MotionPlannerNoMetadata(MotionPlanner[object], abc.ABC):
+    class _NoMetadata:
+        def __str__(self) -> str:
+            return "None"
+
     @property
     @typing_extensions.override
-    def _metadata_class(self) -> typing.Type[object]:
-        return object
+    def _metadata_class(self) -> typing.Type[_NoMetadata]:
+        return self._NoMetadata
 
 
 @typing.final
@@ -416,22 +416,22 @@ if __name__ == "__main__":
     ]
     occupancy_grid = RectangularOccupancyGrid(northwest_corner, obstacles)
     if arguments.algorithm == "breadth-first":
-        planner = BreadthFirstMotionPlanner(
+        motion_planner = BreadthFirstMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
         )
     elif arguments.algorithm == "depth-first":
-        planner = DepthFirstMotionPlanner(
+        motion_planner = DepthFirstMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
         )
     elif arguments.algorithm == "dijkstra":
-        planner = DijkstraMotionPlanner(
+        motion_planner = DijkstraMotionPlanner(
             initial_state, goal_state, occupancy_grid, arguments.random
         )
     else:
         print(f"Unrecognized planner: {arguments.algorithm}")
         exit(1)
-    plan, encountered_states = planner.search()
-    if plan is None:
+    motion_plan, visited = motion_planner.search()
+    if motion_plan is None:
         print("No plan found!")
         exit(1)
     for i, o in enumerate(obstacles):
@@ -444,17 +444,29 @@ if __name__ == "__main__":
             (line,) = plt.plot([v0.y, v1.y], [v0.x, v1.x], "-k", linewidth=2)
             if i == 0 and j == 0:
                 line.set_label("Obstacle boundary")
-    plt.plot(plan[0].y, plan[0].x, "bx", markersize=10, label="Initial state")
-    plt.plot(plan[-1].y, plan[-1].x, "bo", markersize=10, label="Goal state")
     plt.plot(
-        [state.y for state in plan],
-        [state.x for state in plan],
+        motion_plan[0].state.y,
+        motion_plan[0].state.x,
+        "bx",
+        markersize=10,
+        label="Initial state",
+    )
+    plt.plot(
+        motion_plan[-1].state.y,
+        motion_plan[-1].state.x,
+        "bo",
+        markersize=10,
+        label=f"Final (goal) state, metadata={motion_plan[-1].metadata}",
+    )
+    plt.plot(
+        [node.state.y for node in motion_plan],
+        [node.state.x for node in motion_plan],
         "-b",
         label="Motion plan",
     )
     plt.scatter(
-        [state.y for state in encountered_states],
-        [state.x for state in encountered_states],
+        [node.state.y for node in visited],
+        [node.state.x for node in visited],
         c="r",
         marker="x",
         label="Encountered state",
