@@ -105,13 +105,21 @@ class Input:
         return Input(1, -1)
 
 
+InputT_contra = typing.TypeVar("InputT_contra", contravariant=True)
+
+
+class CompatibleState(typing.Generic[InputT_contra], typing.Protocol):
+    def transition(self, input: InputT_contra) -> typing_extensions.Self: ...
+    def distance_to(self, other: typing_extensions.Self) -> float: ...
+
+
 @dataclasses.dataclass
-class State:
+class HolonomicState2D:
     x: int
     y: int
 
-    def transition(self, input: Input) -> State:
-        return State(self.x + input.dx, self.y + input.dy)
+    def transition(self, input: Input) -> HolonomicState2D:
+        return HolonomicState2D(self.x + input.dx, self.y + input.dy)
 
     @property
     def inputs(self) -> list[Input]:
@@ -126,19 +134,19 @@ class State:
             Input.GoNorthwest(),
         ]
 
-    def distance_to(self, other: State) -> float:
+    def distance_to(self, other: HolonomicState2D) -> float:
         return np.sqrt((self.x - other.x) ** 2 + (self.y - other.y) ** 2)
 
 
 @dataclasses.dataclass
 class Obstacle:
-    vertices: list[State]
+    vertices: list[HolonomicState2D]
 
 
 class RectangularOccupancyGrid:
     def __init__(
         self,
-        northwest_corner: State,
+        northwest_corner: HolonomicState2D,
         obstacles: list[Obstacle],
     ) -> None:
         self._lookup_table = np.zeros((northwest_corner.x, northwest_corner.y))
@@ -150,7 +158,9 @@ class RectangularOccupancyGrid:
             for i in range(self._lookup_table.shape[0]):
                 for j in range(self._lookup_table.shape[1]):
 
-                    def point_i_j_is_left_of(half_space: tuple[State, State]) -> bool:
+                    def point_i_j_is_left_of(
+                        half_space: tuple[HolonomicState2D, HolonomicState2D]
+                    ) -> bool:
                         hs_origin = np.array([half_space[0].x, half_space[0].y])
                         hs_vector = (
                             np.array([half_space[1].x, half_space[1].y]) - hs_origin
@@ -163,7 +173,7 @@ class RectangularOccupancyGrid:
                     if all(point_i_j_is_left_of(hs) for hs in half_spaces):
                         self._lookup_table[i, j] = 1
 
-    def is_occupied(self, state: State) -> bool:
+    def is_occupied(self, state: HolonomicState2D) -> bool:
         if (
             state.x >= self._lookup_table.shape[0]
             or state.x < 0
@@ -178,30 +188,36 @@ class RectangularOccupancyGrid:
         return self._lookup_table.size
 
 
-T = typing.TypeVar("T")
+StateT = typing.TypeVar("StateT", bound=CompatibleState[typing.Any])
+MetadataT = typing.TypeVar("MetadataT")
 
 
 @dataclasses.dataclass
-class Node(typing.Generic[T]):
-    state: State
-    parent_node: typing.Optional[Node[T]]
-    metadata: T
+class Node(typing.Generic[StateT, MetadataT]):
+    state: StateT
+    parent_node: typing.Optional[Node[StateT, MetadataT]]
+    metadata: MetadataT
 
 
-class CompatibleQueue(typing.Generic[T], typing.Protocol):
-    def put(self, node: Node[T]) -> None: ...
-    def update(self, node: Node[T]) -> None: ...
-    def pop(self) -> Node[T]: ...
+class CompatibleQueue(typing.Generic[MetadataT, StateT], typing.Protocol):
+    def put(self, node: Node[StateT, MetadataT]) -> None: ...
+    def update(self, node: Node[StateT, MetadataT]) -> None: ...
+    def pop(self) -> Node[StateT, MetadataT]: ...
     def is_empty(self) -> bool: ...
 
 
-class CompatibleOccupancyGrid(typing.Protocol):
-    def is_occupied(self, state: State) -> bool: ...
+StateT_contra = typing.TypeVar(
+    "StateT_contra", bound=CompatibleState[typing.Any], contravariant=True
+)
+
+
+class CompatibleOccupancyGrid(typing.Generic[StateT_contra], typing.Protocol):
+    def is_occupied(self, state: StateT_contra) -> bool: ...
     @property
     def total_spaces(self) -> int: ...
 
 
-class ForwardSearchAlgorithm(typing.Generic[T]):
+class ForwardSearchAlgorithm(typing.Generic[StateT, MetadataT]):
     """
     All motion planning algorithms adhere to the following pattern:
 
@@ -229,24 +245,29 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
     def __init__(
         self,
         queue: CompatibleQueue,
-        metadata_class: typing.Type[T],
-        initial_state: State,
-        goal: State,
+        metadata_class: typing.Type[MetadataT],
+        initial_state: StateT,
+        goal: StateT,
         occupancy_grid: CompatibleOccupancyGrid,
         do_shuffle_inputs: bool,
     ) -> None:
         self._queue = queue
         self._metadata_class = metadata_class
+        self._state_class = type(initial_state)
         self._goal = goal
         self._occupancy_grid = occupancy_grid
         self._do_shuffle_inputs = do_shuffle_inputs
-        self._motion_plan: typing.Optional[list[Node[T]]] = None
+        self._motion_plan: typing.Optional[list[Node[StateT, MetadataT]]] = None
         first_to_be_visisted = Node(initial_state, None, self._metadata_class())
         self._queue.put(first_to_be_visisted)
         self._encountered = [first_to_be_visisted]
-        self._visited: list[Node[T]] = []
+        self._visited: list[Node[StateT, MetadataT]] = []
 
-    def search(self) -> tuple[typing.Optional[list[Node[T]]], list[Node[T]]]:
+    def search(
+        self,
+    ) -> tuple[
+        typing.Optional[list[Node[StateT, MetadataT]]], list[Node[StateT, MetadataT]]
+    ]:
         if self._queue.is_empty():
             # The queue is only empty if the search has already been run
             return (self._motion_plan, self._visited)
@@ -265,7 +286,7 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
                     raise RuntimeError("Algorithm ran too long!")
                 self._visited.append(visiting)
                 if visiting.state == self._goal:
-                    plan: list[Node[T]] = [visiting]
+                    plan: list[Node[StateT, MetadataT]] = [visiting]
                     current = visiting
                     while current.parent_node is not None:
                         current = current.parent_node
@@ -294,11 +315,11 @@ class ForwardSearchAlgorithm(typing.Generic[T]):
         return (None, self._visited)
 
 
-class MotionPlanner(typing.Generic[T], abc.ABC):
+class MotionPlanner(typing.Generic[StateT, MetadataT], abc.ABC):
     def __init__(
         self,
-        initial_state: State,
-        goal: State,
+        initial_state: StateT,
+        goal: StateT,
         occupancy_grid: CompatibleOccupancyGrid,
         do_shuffle_inputs: bool,
     ) -> None:
@@ -317,37 +338,43 @@ class MotionPlanner(typing.Generic[T], abc.ABC):
 
     @property
     @abc.abstractmethod
-    def _metadata_class(self) -> typing.Type[T]:
+    def _metadata_class(self) -> typing.Type[MetadataT]:
         raise NotImplementedError()
 
-    def search(self) -> tuple[typing.Optional[list[Node[T]]], list[Node[T]]]:
+    def search(
+        self,
+    ) -> tuple[
+        typing.Optional[list[Node[StateT, MetadataT]]],
+        list[Node[StateT, MetadataT]],
+    ]:
         return self._forward_search_algorithm.search()
 
 
-class MotionPlannerNoMetadata(MotionPlanner[object], abc.ABC):
-    class _NoMetadata:
-        def __str__(self) -> str:
-            return "None"
+class NoMetadata:
+    def __str__(self) -> str:
+        return "None"
 
+
+class NoMetadataMotionPlanner(MotionPlanner[StateT, NoMetadata], abc.ABC):
     @property
     @typing_extensions.override
-    def _metadata_class(self) -> typing.Type[_NoMetadata]:
-        return self._NoMetadata
+    def _metadata_class(self) -> typing.Type[NoMetadata]:
+        return NoMetadata
 
 
 @typing.final
-class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
+class BreadthFirstMotionPlanner(NoMetadataMotionPlanner[StateT]):
     class _StandardQueueWrapper:
         def __init__(self) -> None:
             self._queue = queue.Queue()
 
-        def put(self, node: Node[typing.Any]) -> None:
+        def put(self, node: Node[StateT, NoMetadata]) -> None:
             self._queue.put(node)
 
-        def update(self, node: Node[typing.Any]) -> None:
+        def update(self, node: Node[StateT, NoMetadata]) -> None:
             pass  # Do nothing
 
-        def pop(self) -> Node[typing.Any]:
+        def pop(self) -> Node[StateT, NoMetadata]:
             return self._queue.get_nowait()
 
         def is_empty(self) -> bool:
@@ -359,18 +386,18 @@ class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
 
 
 @typing.final
-class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
+class DepthFirstMotionPlanner(NoMetadataMotionPlanner[StateT]):
     class _Stack:
         def __init__(self) -> None:
-            self._stack: list[Node[typing.Any]] = []
+            self._stack = []
 
-        def put(self, node: Node[typing.Any]) -> None:
+        def put(self, node: Node[StateT, NoMetadata]) -> None:
             self._stack.append(node)
 
-        def update(self, node: Node[typing.Any]) -> None:
+        def update(self, node: Node[StateT, NoMetadata]) -> None:
             pass  # Do nothing
 
-        def pop(self) -> Node[typing.Any]:
+        def pop(self) -> Node[StateT, NoMetadata]:
             if len(self._stack) == 0:
                 raise RuntimeError("Stack is empty!")
             return self._stack.pop(-1)
@@ -383,28 +410,30 @@ class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
         return self._Stack()
 
 
-class CostBasedMotionPlanner(MotionPlanner[float], abc.ABC):
+class CostBasedMotionPlanner(MotionPlanner[StateT, float], abc.ABC):
     class _PriorityQueue:
-        def __init__(self, compute_cost: typing.Callable[[Node[float]], None]) -> None:
-            self._queue: list[Node[float]] = []
+        def __init__(
+            self, compute_cost: typing.Callable[[Node[StateT, float]], None]
+        ) -> None:
+            self._queue = []
             self._compute_cost = compute_cost
 
-        def put(self, node: Node[float]) -> None:
+        def put(self, node: Node[StateT, float]) -> None:
             self._compute_cost(node)
             self._put(node)
 
-        def _put(self, node: Node[float]) -> None:
+        def _put(self, node: Node[StateT, float]) -> None:
             self._queue.append(node)
             self._queue.sort(key=lambda x: x.metadata)
 
-        def update(self, node: Node[float]) -> None:
+        def update(self, node: Node[StateT, float]) -> None:
             queue_index = [n.state for n in self._queue].index(node.state)
             self._compute_cost(node)
             if self._queue[queue_index].metadata > node.metadata:
                 self._queue.pop(queue_index)
                 self._put(node)
 
-        def pop(self) -> Node[float]:
+        def pop(self) -> Node[StateT, float]:
             if len(self._queue) == 0:
                 raise RuntimeError("Queue is empty!")
             return self._queue.pop(0)
@@ -417,7 +446,7 @@ class CostBasedMotionPlanner(MotionPlanner[float], abc.ABC):
         return self._PriorityQueue(self._compute_cost)
 
     @abc.abstractmethod
-    def _compute_cost(self, node: Node[float]) -> None:
+    def _compute_cost(self, node: Node[StateT, float]) -> None:
         raise NotImplementedError()
 
     @property
@@ -427,9 +456,9 @@ class CostBasedMotionPlanner(MotionPlanner[float], abc.ABC):
 
 
 @typing.final
-class DijkstraMotionPlanner(CostBasedMotionPlanner):
+class DijkstraMotionPlanner(CostBasedMotionPlanner[StateT]):
     @typing_extensions.override
-    def _compute_cost(self, node: Node[float]) -> None:
+    def _compute_cost(self, node: Node[StateT, float]) -> None:
         if node.parent_node is None:
             node.metadata = 0.0
         else:
@@ -440,13 +469,13 @@ class DijkstraMotionPlanner(CostBasedMotionPlanner):
 
 
 @typing.final
-class AStarMotionPlanner(CostBasedMotionPlanner):
+class AStarMotionPlanner(CostBasedMotionPlanner[StateT]):
     def __init__(self, *args, **kwargs) -> None:
-        self._goal: State = args[1]
+        self._goal: StateT = args[1]
         super().__init__(*args, **kwargs)
 
     @typing_extensions.override
-    def _compute_cost(self, node: Node[float]) -> None:
+    def _compute_cost(self, node: Node[StateT, float]) -> None:
         if node.parent_node is None:
             node.metadata = 0.0
         else:
@@ -474,15 +503,50 @@ if __name__ == "__main__":
         help="Shuffle inputs randomly before putting onto queue",
     )
     arguments = parser.parse_args()
-    initial_state = State(1, 9)
-    goal_state = State(18, 1)
-    northwest_corner = State(30, 30)
+    initial_state = HolonomicState2D(1, 9)
+    goal_state = HolonomicState2D(18, 1)
+    northwest_corner = HolonomicState2D(30, 30)
     obstacles = [
-        Obstacle([State(12, 0), State(12, 15), State(15, 15), State(15, 0)]),
-        Obstacle([State(15, 12), State(15, 15), State(28, 15), State(28, 12)]),
-        Obstacle([State(15, 15), State(15, 25), State(18, 25), State(18, 15)]),
-        Obstacle([State(23, 18), State(23, 30), State(24, 30), State(24, 18)]),
-        Obstacle([State(3, 20), State(3, 21), State(13, 21), State(13, 20)]),
+        Obstacle(
+            [
+                HolonomicState2D(12, 0),
+                HolonomicState2D(12, 15),
+                HolonomicState2D(15, 15),
+                HolonomicState2D(15, 0),
+            ]
+        ),
+        Obstacle(
+            [
+                HolonomicState2D(15, 12),
+                HolonomicState2D(15, 15),
+                HolonomicState2D(28, 15),
+                HolonomicState2D(28, 12),
+            ]
+        ),
+        Obstacle(
+            [
+                HolonomicState2D(15, 15),
+                HolonomicState2D(15, 25),
+                HolonomicState2D(18, 25),
+                HolonomicState2D(18, 15),
+            ]
+        ),
+        Obstacle(
+            [
+                HolonomicState2D(23, 18),
+                HolonomicState2D(23, 30),
+                HolonomicState2D(24, 30),
+                HolonomicState2D(24, 18),
+            ]
+        ),
+        Obstacle(
+            [
+                HolonomicState2D(3, 20),
+                HolonomicState2D(3, 21),
+                HolonomicState2D(13, 21),
+                HolonomicState2D(13, 20),
+            ]
+        ),
     ]
     occupancy_grid = RectangularOccupancyGrid(northwest_corner, obstacles)
     if arguments.algorithm == "breadth-first":
