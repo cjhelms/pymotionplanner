@@ -161,8 +161,8 @@ class Node(typing.Generic[T]):
 
 
 class CompatibleQueue(typing.Generic[T], typing.Protocol):
-    def put(self, state: Node[T]) -> None: ...
-    def update(self, state: Node[T]) -> None: ...
+    def put(self, node: Node[T]) -> None: ...
+    def update(self, node: Node[T]) -> None: ...
     def pop(self) -> Node[T]: ...
     def is_empty(self) -> bool: ...
 
@@ -310,13 +310,13 @@ class BreadthFirstMotionPlanner(MotionPlannerNoMetadata):
         def __init__(self) -> None:
             self._queue = queue.Queue()
 
-        def put(self, state: Node[typing.Any]) -> None:
-            self._queue.put(state)
+        def put(self, node: Node[typing.Any]) -> None:
+            self._queue.put(node)
 
-        def update(self, state: Node[typing.Any]) -> None:
+        def update(self, node: Node[typing.Any]) -> None:
             pass  # Do nothing
 
-        def pop(self) -> Node:
+        def pop(self) -> Node[typing.Any]:
             return self._queue.get_nowait()
 
         def is_empty(self) -> bool:
@@ -333,10 +333,10 @@ class DepthFirstMotionPlanner(MotionPlannerNoMetadata):
         def __init__(self) -> None:
             self._stack: list[Node[typing.Any]] = []
 
-        def put(self, state: Node[typing.Any]) -> None:
-            self._stack.append(state)
+        def put(self, node: Node[typing.Any]) -> None:
+            self._stack.append(node)
 
-        def update(self, state: Node[typing.Any]) -> None:
+        def update(self, node: Node[typing.Any]) -> None:
             pass  # Do nothing
 
         def pop(self) -> Node[typing.Any]:
@@ -357,17 +357,17 @@ class DijkstraMotionPlanner(MotionPlanner[int]):
         def __init__(self) -> None:
             self._queue: list[Node[int]] = []
 
-        def put(self, state: Node[int]) -> None:
-            state.metadata = (
-                state.parent_node.metadata + 1 if state.parent_node is not None else 0
+        def put(self, node: Node[int]) -> None:
+            node.metadata = (
+                node.parent_node.metadata + 1 if node.parent_node is not None else 0
             )
-            self._queue.append(state)
+            self._queue.append(node)
             self._queue.sort(key=lambda x: x.metadata)
 
-        def update(self, state: Node[int]) -> None:
-            queue_index = [n.state for n in self._queue].index(state.state)
+        def update(self, node: Node[int]) -> None:
+            queue_index = [n.state for n in self._queue].index(node.state)
             self._queue.pop(queue_index)
-            self.put(state)
+            self.put(node)
 
         def pop(self) -> Node[int]:
             if len(self._queue) == 0:
