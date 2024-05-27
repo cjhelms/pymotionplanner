@@ -9,6 +9,33 @@ import numpy as np
 import discrete
 
 
+class HolonomicRobot2D:
+    def transition(self, state: State2D, input: HolonomicInput2D) -> State2D:
+        return State2D(state.x + input.dx, state.y + input.dy)
+
+    def get_inputs(self, state: State2D) -> list[HolonomicInput2D]:
+        return [
+            HolonomicInput2D.GoNorth(),
+            HolonomicInput2D.GoNortheast(),
+            HolonomicInput2D.GoEast(),
+            HolonomicInput2D.GoSoutheast(),
+            HolonomicInput2D.GoSouth(),
+            HolonomicInput2D.GoSouthwest(),
+            HolonomicInput2D.GoWest(),
+            HolonomicInput2D.GoNorthwest(),
+        ]
+
+
+@dataclasses.dataclass
+class State2D:
+    x: int
+    y: int
+
+
+def distance_between(a: State2D, b: State2D) -> float:
+    return np.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
+
+
 @dataclasses.dataclass
 class HolonomicInput2D:
     dx: int
@@ -47,44 +74,8 @@ class HolonomicInput2D:
         return HolonomicInput2D(1, -1)
 
 
-@dataclasses.dataclass
-class State2D:
-    x: int
-    y: int
-
-
-class HolonomicRobot2D:
-    def transition(self, state: State2D, input: HolonomicInput2D) -> State2D:
-        return State2D(state.x + input.dx, state.y + input.dy)
-
-    def get_inputs(self, state: State2D) -> list[HolonomicInput2D]:
-        return [
-            HolonomicInput2D.GoNorth(),
-            HolonomicInput2D.GoNortheast(),
-            HolonomicInput2D.GoEast(),
-            HolonomicInput2D.GoSoutheast(),
-            HolonomicInput2D.GoSouth(),
-            HolonomicInput2D.GoSouthwest(),
-            HolonomicInput2D.GoWest(),
-            HolonomicInput2D.GoNorthwest(),
-        ]
-
-
-def distance_between(a: State2D, b: State2D) -> float:
-    return np.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2)
-
-
-@dataclasses.dataclass
-class Obstacle:
-    vertices: list[State2D]
-
-
-class RectangularOccupancyGrid:
-    def __init__(
-        self,
-        northwest_corner: State2D,
-        obstacles: list[Obstacle],
-    ) -> None:
+class RectangularOccupancyGrid2D:
+    def __init__(self, northwest_corner: State2D, obstacles: list[Obstacle2D]) -> None:
         self._lookup_table = np.zeros((northwest_corner.x, northwest_corner.y))
         for o in obstacles:
             half_spaces = [
@@ -124,7 +115,12 @@ class RectangularOccupancyGrid:
         return self._lookup_table.size
 
 
-if __name__ == "__main__":
+@dataclasses.dataclass
+class Obstacle2D:
+    vertices: list[State2D]
+
+
+def parse_command_line_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-a",
@@ -140,18 +136,28 @@ if __name__ == "__main__":
         default=False,
         help="Shuffle inputs randomly before putting onto queue",
     )
-    arguments = parser.parse_args()
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    arguments = parse_command_line_arguments()
     initial_state = State2D(1, 9)
     goal_state = State2D(18, 1)
     northwest_corner = State2D(30, 30)
     obstacles = [
-        Obstacle([State2D(12, 0), State2D(12, 15), State2D(15, 15), State2D(15, 0)]),
-        Obstacle([State2D(15, 12), State2D(15, 15), State2D(28, 15), State2D(28, 12)]),
-        Obstacle([State2D(15, 15), State2D(15, 25), State2D(18, 25), State2D(18, 15)]),
-        Obstacle([State2D(23, 18), State2D(23, 30), State2D(24, 30), State2D(24, 18)]),
-        Obstacle([State2D(3, 20), State2D(3, 21), State2D(13, 21), State2D(13, 20)]),
+        Obstacle2D([State2D(12, 0), State2D(12, 15), State2D(15, 15), State2D(15, 0)]),
+        Obstacle2D(
+            [State2D(15, 12), State2D(15, 15), State2D(28, 15), State2D(28, 12)]
+        ),
+        Obstacle2D(
+            [State2D(15, 15), State2D(15, 25), State2D(18, 25), State2D(18, 15)]
+        ),
+        Obstacle2D(
+            [State2D(23, 18), State2D(23, 30), State2D(24, 30), State2D(24, 18)]
+        ),
+        Obstacle2D([State2D(3, 20), State2D(3, 21), State2D(13, 21), State2D(13, 20)]),
     ]
-    occupancy_grid = RectangularOccupancyGrid(northwest_corner, obstacles)
+    occupancy_grid = RectangularOccupancyGrid2D(northwest_corner, obstacles)
     if arguments.algorithm == "breadth-first":
         motion_planner = discrete.BreadthFirstMotionPlanner(
             HolonomicRobot2D(),
@@ -166,7 +172,7 @@ if __name__ == "__main__":
             initial_state,
             goal_state,
             occupancy_grid,
-            arguments.random,
+            arguments.random,  # TODO: Move arg out to HolonomicRobot2D
         )
     elif arguments.algorithm == "dijkstra":
         motion_planner = discrete.DijkstraMotionPlanner(
