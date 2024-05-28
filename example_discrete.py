@@ -18,7 +18,7 @@ Axis shown is the "world frame" with origin at (0, 0).
 
 The obstacles shall be represented using an occupancy grid. That is, since the space is already
 discretized into (in this instance) N^2, we simply encode the cells which correspond to obstacles
-in a look-up table such that if p E R^2 maps to "True" then p is occupied and is not a valid space
+in a look-up table such that if p E N^2 maps to "True" then p is occupied and is not a valid space
 for the robot to occupy. Encoding the example above where "1" is "True" and "0" is "False" yields:
     ┌                           ┐
   6 │ 1 1 1 1 1 1 1 1 1 1 1 1 1 │
