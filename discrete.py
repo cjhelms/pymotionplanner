@@ -52,18 +52,20 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
     """
     All motion planning algorithms adhere to the following pattern:
 
+      Given: x := State, u := Input
+
       q ◄─ Queue()
       Insert x_0 into q
       While q is not empty:
         x_i ◄─ Pop q
+        If x_i is the goal:
+          Traverse backwards to x_0 through ancestry of x_i
+          Return reverse of traversal as motion plan
         u_0, ..., u_n ◄─ All inputs applicable from x_i
         For u_j in u_0, ..., u_n:
           x_i_j ◄─ Transition x_i given u_j
-          If x_i_j has not yet been to_be_visited and is not in an occupied cell:
+          If x_i_j has not yet been encountered and is not in an occupied cell:
             Record x_i_j as an to_be_visited state with parent x_i
-            If x_i_j is the goal:
-              Traverse backwards to x_0 through ancestry of x_i_j
-              Return reverse of traversal as motion plan
             Put x_i_j onto q
       No solution found => return no motion plan
 
