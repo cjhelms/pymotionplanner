@@ -70,25 +70,17 @@ def main() -> None:
     motion_planner = make_motion_planner(arguments.algorithm, settings)
     result = motion_planner.search()
     if result.motion_plan is None:
-        print("No plan found!")
+        print("No motion plan found!")
         exit(1)
     axes = plt.axes()
     settings.occupancy_grid.plot(axes)
-    plot_motion_plan(result.motion_plan, axes)
-    plot_visited(result.visited, axes)
-    axes.grid()
-    axes.legend()
-    axes.set_title(f"Results ({arguments.algorithm})")
-    axes.set_xlabel("y")
-    axes.set_ylabel("x")
+    plot_motion_plan(axes, result.motion_plan)
+    plot_visited(axes, result.visited)
+    configure_axes(axes, arguments.algorithm)
     if arguments.output is None:
         plt.show()
     else:
-        output_path = pathlib.Path(arguments.output)
-        output_path.mkdir(parents=True, exist_ok=True)
-        file_path = output_path / f"{arguments.algorithm}.jpg"
-        print(f"Saving results to '{file_path}'...")
-        plt.savefig(file_path)
+        save_figure(pathlib.Path(arguments.output), arguments.algorithm)
 
 
 def parse_command_line_arguments() -> argparse.Namespace:
@@ -183,6 +175,7 @@ class HolonomicRobot2D:
     def get_inputs(self, state: State2D) -> list[HolonomicInput2D]:
         # Note the state is unused because the robot is not constrained on how it can move given its
         # current state (i.e. holonomic)
+
         inputs = [
             HolonomicInput2D.GoNorth(),
             HolonomicInput2D.GoNortheast(),
@@ -317,7 +310,7 @@ def distance_between(a: State2D, b: State2D) -> float:
 
 
 def plot_motion_plan(
-    nodes: list[discrete.Node[State2D, typing.Any]], axes: matplotlib.axes.Axes
+    axes: matplotlib.axes.Axes, nodes: list[discrete.Node[State2D, typing.Any]]
 ) -> None:
     axes.plot(
         nodes[0].state.y,
@@ -342,7 +335,7 @@ def plot_motion_plan(
 
 
 def plot_visited(
-    nodes: list[discrete.Node[State2D, typing.Any]], axes: matplotlib.axes.Axes
+    axes: matplotlib.axes.Axes, nodes: list[discrete.Node[State2D, typing.Any]]
 ) -> None:
     axes.scatter(
         [n.state.y for n in nodes],
@@ -351,6 +344,21 @@ def plot_visited(
         marker="x",
         label="Visited state",
     )
+
+
+def configure_axes(axes: matplotlib.axes.Axes, title: str) -> None:
+    axes.grid()
+    axes.legend()
+    axes.set_title(f"Results ({title})")
+    axes.set_xlabel("y")
+    axes.set_ylabel("x")
+
+
+def save_figure(output_directory: pathlib.Path, file_name: str) -> None:
+    output_directory.mkdir(parents=True, exist_ok=True)
+    file = output_directory / f"{file_name}.jpg"
+    print(f"Saving results to '{file}'...")
+    plt.savefig(file)
 
 
 if __name__ == "__main__":

@@ -73,6 +73,34 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
     ordered when x_i_j is put onto q. There are some other differences (e.g. Dijkstra's records
     scores for each state visited), but these additional differences typically only exist to sort
     the queue.
+
+    Example usage:
+
+      robot = MyRobot(...)
+      # Construct user-defined robot adhering to CompatibleRobot protocol
+
+      initial_state = MyState(...)
+      goal = MyState(...)
+      # Construct initial and goal states in state space (type) chosen by user
+
+      grid = MyOccupancyGrid(...)
+      # Construct an occupancy grid in chosen state space to define obstacles
+
+      algorithm = ForwardSearchAlgorithm(robot, initial_state, goal, grid)
+      # Construct the algorithm using the above setting
+
+      result = algorithm.search()
+      # Retrieve the results of the search
+
+      print(result.motion_plan)
+      # The series of nodes to go from initial state to goal (None if no solution)
+
+      print(result.input_sequence)
+      # The sequence of inputs to be executed in order to realize the motion plan
+
+      print(result.visited)
+      # List of all nodes visited in the order they were visited
+
     """
 
     def __init__(
@@ -86,11 +114,11 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         self.__goal = goal
         self.__occupancy_grid = occupancy_grid
         self.__to_be_visited = self._make_node_data_structure()
-        self.__motion_plan: typing.Optional[list[Node[StateT, MetadataT]]] = None
         first_to_be_visisted = Node(initial_state, None, self._metadata_class())
         self.__to_be_visited.put(first_to_be_visisted)
         self.__encountered = [first_to_be_visisted]
         self.__visited: list[Node[StateT, MetadataT]] = []
+        self.__cached_result: typing.Optional[SearchResult[StateT, MetadataT]] = None
 
     @abc.abstractmethod
     def _make_node_data_structure(
@@ -105,49 +133,88 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
 
     @typing.final
     def search(self) -> SearchResult[StateT, MetadataT]:
-        if self.__to_be_visited.is_empty():
-            # The queue is only empty if the search has already been run
-            return SearchResult(self.__motion_plan, self.__visited)
-        iteration = 0
+        if self.__cached_result is not None:
+            return self.__cached_result
+        watchdog = self._IterationWatchdog(self.__occupancy_grid.total_spaces)
         with tqdm.tqdm(total=self.__occupancy_grid.total_spaces) as progress_bar:
-            while not self.__to_be_visited.is_empty():
-                visiting = self.__to_be_visited.pop()
-                if visiting in self.__visited:
-                    continue
-                # The progress bar shows how many nodes out of all possible have been processed, so
-                # the algorithm may successfully terminate before the progress bar shows 100% and,
-                # further, reaching 100% likely will correspond to failure to find a motion plan
-                progress_bar.update(1)
-                iteration += 1
-                if iteration > self.__occupancy_grid.total_spaces:
-                    raise RuntimeError("Algorithm ran too long!")
-                self.__visited.append(visiting)
-                if visiting.state == self.__goal:
-                    plan: list[Node[StateT, MetadataT]] = [visiting]
-                    current = visiting
-                    while current.parent_node is not None:
-                        current = current.parent_node
-                        plan.append(current)
-                    plan.reverse()
-                    self.__motion_plan = plan
-                    return SearchResult(self.__motion_plan, self.__visited)
-                inputs = self.__robot.get_inputs(visiting.state)
-                for input in inputs:
-                    to_be_visited = Node(
-                        self.__robot.transition(visiting.state, input),
-                        visiting,
-                        self._metadata_class(),
-                    )
-                    if self.__occupancy_grid.is_occupied(
-                        to_be_visited.state
-                    ) or to_be_visited.state in [v.state for v in self.__visited]:
-                        continue
-                    if to_be_visited.state in [e.state for e in self.__encountered]:
-                        self.__to_be_visited.update(to_be_visited)
-                        continue
-                    self.__encountered.append(to_be_visited)
-                    self.__to_be_visited.put(to_be_visited)
-        return SearchResult(None, self.__visited)
+            return self.__search(watchdog, progress_bar)
+
+    class _IterationWatchdog:
+        def __init__(self, max_iterations: int) -> None:
+            self._max_iterations = max_iterations
+            self._iteration = 0
+
+        def update(self) -> None:
+            self._iteration += 1
+            if self._iteration > self._max_iterations:
+                raise RuntimeError("Algorithm ran too long!")
+
+    def __search(
+        self,
+        watchdog: ForwardSearchAlgorithm._IterationWatchdog,
+        progress_bar: tqdm.tqdm,
+    ) -> SearchResult[StateT, MetadataT]:
+        while not self.__to_be_visited.is_empty():
+            visiting = self.__to_be_visited.pop()
+            if visiting in self.__visited:
+                continue
+
+            progress_bar.update(1)
+            # The progress bar shows how many nodes out of all possible have been processed. Once
+            # all nodes have been reached (100%), there are no more unsearched nodes. If no motion
+            # plan is found by 100%, then there is no solution. If a motion plan is found before
+            # all nodes have been searched, the algorithm early returns with the solution.
+
+            watchdog.update()
+            # Given this is a while loop, programming mistakes can easily result in infinite loops.
+            # This acts as a safety check for the developer.
+
+            result = self.__visit(visiting)
+            if result is not None:
+                return result
+        self.__cached_result = SearchResult(None, self.__visited)
+        return self.__cached_result
+
+    def __visit(
+        self, node: Node[StateT, MetadataT]
+    ) -> typing.Optional[SearchResult[StateT, MetadataT]]:
+        self.__visited.append(node)
+        if node.state == self.__goal:
+            motion_plan = self.__assemble_motion_plan(node)
+            self.__cached_result = SearchResult(motion_plan, self.__visited)
+            return self.__cached_result
+        inputs = self.__robot.get_inputs(node.state)
+        for input in inputs:
+            to_be_visited = Node(
+                self.__robot.transition(node.state, input), node, self._metadata_class()
+            )
+            self.__handle_new_node(to_be_visited)
+
+    @staticmethod
+    def __assemble_motion_plan(
+        terminus: Node[StateT, MetadataT]
+    ) -> list[Node[StateT, MetadataT]]:
+        plan: list[Node[StateT, MetadataT]] = [terminus]
+        current = terminus
+        while current.parent_node is not None:
+            current = current.parent_node
+            plan.append(current)
+        plan.reverse()
+        return plan
+
+    def __handle_new_node(self, node: Node[StateT, MetadataT]) -> None:
+        visited_states = [v.state for v in self.__visited]
+        if (
+            self.__occupancy_grid.is_occupied(node.state)
+            or node.state in visited_states
+        ):
+            return
+        encountered_states = [e.state for e in self.__encountered]
+        if node.state in encountered_states:
+            self.__to_be_visited.update(node)
+            return
+        self.__encountered.append(node)
+        self.__to_be_visited.put(node)
 
 
 @dataclasses.dataclass
