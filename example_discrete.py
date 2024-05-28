@@ -310,7 +310,8 @@ def distance_between(a: State2D, b: State2D) -> float:
 
 
 def plot_motion_plan(
-    axes: matplotlib.axes.Axes, nodes: list[discrete.Node[State2D, typing.Any]]
+    axes: matplotlib.axes.Axes,
+    nodes: list[discrete.Node[State2D, HolonomicInput2D, typing.Any]],
 ) -> None:
     axes.plot(
         nodes[0].state.y,
@@ -335,7 +336,8 @@ def plot_motion_plan(
 
 
 def plot_visited(
-    axes: matplotlib.axes.Axes, nodes: list[discrete.Node[State2D, typing.Any]]
+    axes: matplotlib.axes.Axes,
+    nodes: list[discrete.Node[State2D, HolonomicInput2D, typing.Any]],
 ) -> None:
     axes.scatter(
         [n.state.y for n in nodes],

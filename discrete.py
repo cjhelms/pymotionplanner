@@ -114,16 +114,18 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         self.__goal = goal
         self.__occupancy_grid = occupancy_grid
         self.__to_be_visited = self._make_node_data_structure()
-        first_to_be_visisted = Node(initial_state, None, self._metadata_class())
+        first_to_be_visisted = Node(initial_state, None, None, self._metadata_class())
         self.__to_be_visited.put(first_to_be_visisted)
         self.__encountered = [first_to_be_visisted]
-        self.__visited: list[Node[StateT, MetadataT]] = []
-        self.__cached_result: typing.Optional[SearchResult[StateT, MetadataT]] = None
+        self.__visited: list[Node[StateT, InputT, MetadataT]] = []
+        self.__cached_result: typing.Optional[
+            SearchResult[StateT, InputT, MetadataT]
+        ] = None
 
     @abc.abstractmethod
     def _make_node_data_structure(
         self,
-    ) -> CompatibleNodeDataStructure[MetadataT, StateT]:
+    ) -> CompatibleNodeDataStructure[StateT, InputT, MetadataT]:
         raise NotImplementedError()
 
     @property
@@ -132,7 +134,7 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         raise NotImplementedError()
 
     @typing.final
-    def search(self) -> SearchResult[StateT, MetadataT]:
+    def search(self) -> SearchResult[StateT, InputT, MetadataT]:
         if self.__cached_result is not None:
             return self.__cached_result
         watchdog = self._IterationWatchdog(self.__occupancy_grid.total_spaces)
@@ -153,7 +155,7 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         self,
         watchdog: ForwardSearchAlgorithm._IterationWatchdog,
         progress_bar: tqdm.tqdm,
-    ) -> SearchResult[StateT, MetadataT]:
+    ) -> SearchResult[StateT, InputT, MetadataT]:
         while not self.__to_be_visited.is_empty():
             visiting = self.__to_be_visited.pop()
             if visiting in self.__visited:
@@ -176,8 +178,8 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         return self.__cached_result
 
     def __visit(
-        self, node: Node[StateT, MetadataT]
-    ) -> typing.Optional[SearchResult[StateT, MetadataT]]:
+        self, node: Node[StateT, InputT, MetadataT]
+    ) -> typing.Optional[SearchResult[StateT, InputT, MetadataT]]:
         self.__visited.append(node)
         if node.state == self.__goal:
             motion_plan = self.__assemble_motion_plan(node)
@@ -186,15 +188,18 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         inputs = self.__robot.get_inputs(node.state)
         for input in inputs:
             to_be_visited = Node(
-                self.__robot.transition(node.state, input), node, self._metadata_class()
+                self.__robot.transition(node.state, input),
+                input,
+                node,
+                self._metadata_class(),
             )
             self.__handle_new_node(to_be_visited)
 
     @staticmethod
     def __assemble_motion_plan(
-        terminus: Node[StateT, MetadataT]
-    ) -> list[Node[StateT, MetadataT]]:
-        plan: list[Node[StateT, MetadataT]] = [terminus]
+        terminus: Node[StateT, InputT, MetadataT]
+    ) -> list[Node[StateT, InputT, MetadataT]]:
+        plan: list[Node[StateT, InputT, MetadataT]] = [terminus]
         current = terminus
         while current.parent_node is not None:
             current = current.parent_node
@@ -202,7 +207,7 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
         plan.reverse()
         return plan
 
-    def __handle_new_node(self, node: Node[StateT, MetadataT]) -> None:
+    def __handle_new_node(self, node: Node[StateT, InputT, MetadataT]) -> None:
         visited_states = [v.state for v in self.__visited]
         if (
             self.__occupancy_grid.is_occupied(node.state)
@@ -218,15 +223,17 @@ class ForwardSearchAlgorithm(typing.Generic[StateT, InputT, MetadataT], abc.ABC)
 
 
 @dataclasses.dataclass
-class SearchResult(typing.Generic[StateT, MetadataT]):
-    motion_plan: typing.Optional[list[Node[StateT, MetadataT]]]
-    visited: list[Node[StateT, MetadataT]]
+class SearchResult(typing.Generic[StateT, InputT, MetadataT]):
+    motion_plan: typing.Optional[list[Node[StateT, InputT, MetadataT]]]
+    visited: list[Node[StateT, InputT, MetadataT]]
 
 
-class CompatibleNodeDataStructure(typing.Generic[MetadataT, StateT], typing.Protocol):
-    def put(self, node: Node[StateT, MetadataT]) -> None: ...
-    def update(self, node: Node[StateT, MetadataT]) -> None: ...
-    def pop(self) -> Node[StateT, MetadataT]: ...
+class CompatibleNodeDataStructure(
+    typing.Generic[StateT, InputT, MetadataT], typing.Protocol
+):
+    def put(self, node: Node[StateT, InputT, MetadataT]) -> None: ...
+    def update(self, node: Node[StateT, InputT, MetadataT]) -> None: ...
+    def pop(self) -> Node[StateT, InputT, MetadataT]: ...
     def is_empty(self) -> bool: ...
 
 
@@ -240,9 +247,10 @@ class CompatibleOccupancyGrid(typing.Generic[StateT_contra], typing.Protocol):
 
 
 @dataclasses.dataclass
-class Node(typing.Generic[StateT, MetadataT]):
+class Node(typing.Generic[StateT, InputT, MetadataT]):
     state: StateT
-    parent_node: typing.Optional[Node[StateT, MetadataT]]
+    input: typing.Optional[InputT]
+    parent_node: typing.Optional[Node[StateT, InputT, MetadataT]]
     metadata: MetadataT
 
 
@@ -254,7 +262,7 @@ class NoMetadata:
 @typing.final
 class BreadthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadata]):
     @typing_extensions.override
-    def _make_node_data_structure(self) -> NodeQueue[StateT]:
+    def _make_node_data_structure(self) -> NodeQueue[StateT, InputT]:
         return NodeQueue()
 
     @property
@@ -263,22 +271,22 @@ class BreadthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadat
         return NoMetadata
 
 
-class NoUpdateNodeDataStructure(typing.Generic[StateT, MetadataT]):
-    def update(self, node: Node[StateT, MetadataT]) -> None:
+class NoUpdateNodeDataStructure(typing.Generic[StateT, InputT, MetadataT]):
+    def update(self, node: Node[StateT, InputT, MetadataT]) -> None:
         self.__do_nothing()
 
     def __do_nothing(self) -> None:
         pass
 
 
-class NodeQueue(NoUpdateNodeDataStructure[StateT, NoMetadata]):
+class NodeQueue(NoUpdateNodeDataStructure[StateT, InputT, NoMetadata]):
     def __init__(self) -> None:
         self._queue = queue.Queue()
 
-    def put(self, node: Node[StateT, NoMetadata]) -> None:
+    def put(self, node: Node[StateT, InputT, NoMetadata]) -> None:
         self._queue.put(node)
 
-    def pop(self) -> Node[StateT, NoMetadata]:
+    def pop(self) -> Node[StateT, InputT, NoMetadata]:
         return self._queue.get_nowait()
 
     def is_empty(self) -> bool:
@@ -288,7 +296,7 @@ class NodeQueue(NoUpdateNodeDataStructure[StateT, NoMetadata]):
 @typing.final
 class DepthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadata]):
     @typing_extensions.override
-    def _make_node_data_structure(self) -> NodeStack[StateT]:
+    def _make_node_data_structure(self) -> NodeStack[StateT, InputT]:
         return NodeStack()
 
     @property
@@ -297,14 +305,14 @@ class DepthFirstMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, NoMetadata]
         return NoMetadata
 
 
-class NodeStack(NoUpdateNodeDataStructure[StateT, NoMetadata]):
+class NodeStack(NoUpdateNodeDataStructure[StateT, InputT, NoMetadata]):
     def __init__(self) -> None:
         self._stack = []
 
-    def put(self, node: Node[StateT, NoMetadata]) -> None:
+    def put(self, node: Node[StateT, InputT, NoMetadata]) -> None:
         self._stack.append(node)
 
-    def pop(self) -> Node[StateT, NoMetadata]:
+    def pop(self) -> Node[StateT, InputT, NoMetadata]:
         if len(self._stack) == 0:
             raise RuntimeError("Stack is empty!")
         return self._stack.pop(-1)
@@ -322,7 +330,7 @@ class DijkstraMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
         super().__init__(*args, **kwargs)
 
     @typing_extensions.override
-    def _make_node_data_structure(self) -> DijkstraPriorityNodeQueue[StateT]:
+    def _make_node_data_structure(self) -> DijkstraPriorityNodeQueue[StateT, InputT]:
         return self._queue
 
     @property
@@ -331,30 +339,30 @@ class DijkstraMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
         return float
 
 
-class PriorityNodeQueue(typing.Generic[StateT], abc.ABC):
+class PriorityNodeQueue(typing.Generic[StateT, InputT], abc.ABC):
     def __init__(self) -> None:
-        self._queue: list[Node[StateT, float]] = []
+        self._queue: list[Node[StateT, InputT, float]] = []
 
-    def put(self, node: Node[StateT, float]) -> None:
+    def put(self, node: Node[StateT, InputT, float]) -> None:
         node.metadata = self._compute_cost(node)
         self._put(node)
 
     @abc.abstractmethod
-    def _compute_cost(self, node: Node[StateT, float]) -> float:
+    def _compute_cost(self, node: Node[StateT, InputT, float]) -> float:
         raise NotImplementedError()
 
-    def _put(self, node: Node[StateT, float]) -> None:
+    def _put(self, node: Node[StateT, InputT, float]) -> None:
         self._queue.append(node)
         self._queue.sort(key=lambda x: x.metadata)
 
-    def update(self, node: Node[StateT, float]) -> None:
+    def update(self, node: Node[StateT, InputT, float]) -> None:
         queue_index = [n.state for n in self._queue].index(node.state)
         node.metadata = self._compute_cost(node)
         if self._queue[queue_index].metadata > node.metadata:
             self._queue.pop(queue_index)
             self._put(node)
 
-    def pop(self) -> Node[StateT, float]:
+    def pop(self) -> Node[StateT, InputT, float]:
         if len(self._queue) == 0:
             raise RuntimeError("Queue is empty!")
         return self._queue.pop(0)
@@ -363,13 +371,13 @@ class PriorityNodeQueue(typing.Generic[StateT], abc.ABC):
         return len(self._queue) == 0
 
 
-class DijkstraPriorityNodeQueue(PriorityNodeQueue[StateT]):
+class DijkstraPriorityNodeQueue(PriorityNodeQueue[StateT, InputT]):
     def __init__(self, cost_to_come: typing.Callable[[StateT, StateT], float]) -> None:
         self._cost_to_come = cost_to_come
         super().__init__()
 
     @typing_extensions.override
-    def _compute_cost(self, node: Node[StateT, float]) -> float:
+    def _compute_cost(self, node: Node[StateT, InputT, float]) -> float:
         if node.parent_node is None:
             return 0.0
         return node.parent_node.metadata + self._cost_to_come(
@@ -390,7 +398,7 @@ class AStarMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
         super().__init__(*args, **kwargs)
 
     @typing_extensions.override
-    def _make_node_data_structure(self) -> AStarPriorityNodeQueue[StateT]:
+    def _make_node_data_structure(self) -> AStarPriorityNodeQueue[StateT, InputT]:
         return self._queue
 
     @property
@@ -400,7 +408,7 @@ class AStarMotionPlanner(ForwardSearchAlgorithm[StateT, InputT, float]):
 
 
 @typing.final
-class AStarPriorityNodeQueue(DijkstraPriorityNodeQueue[StateT]):
+class AStarPriorityNodeQueue(DijkstraPriorityNodeQueue[StateT, InputT]):
     def __init__(
         self, cost_to_go: typing.Callable[[StateT], float], *args, **kwargs
     ) -> None:
@@ -408,7 +416,7 @@ class AStarPriorityNodeQueue(DijkstraPriorityNodeQueue[StateT]):
         super().__init__(*args, **kwargs)
 
     @typing_extensions.override
-    def _compute_cost(self, node: Node[StateT, float]) -> float:
+    def _compute_cost(self, node: Node[StateT, InputT, float]) -> float:
         cost = super()._compute_cost(node)
         if cost > 0:
             return cost + self._cost_to_go(node.state)
